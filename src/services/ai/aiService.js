@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // You'll need to add your OpenAI API key here
-const OPENAI_API_KEY = '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'; // Store this securely in environment variables
+const OPENAI_API_KEY = 'YOUR_OPENAI_KEY'; // Store this securely in environment variables
 
 class AIService {
   constructor() {
