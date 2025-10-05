@@ -1,129 +1,107 @@
 import { supabase } from './supabase/supabaseClient';
-import AIService from './ai/aiService';
 
 class PackingService {
-  // Create packing list
-  async createPackingList(tripId, name, userId) {
+  // Create packing item
+  async createPackingItem(itemData) {
     try {
       const { data, error } = await supabase
-        .from('packing_lists')
-        .insert([{
-          trip_id: tripId,
-          name: name,
-          created_by: userId
-        }])
-        .select()
+        .from('packing_items')
+        .insert([itemData])
+        .select('*')
         .single();
 
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error creating packing list:', error);
+      console.error('Error creating packing item:', error);
       throw error;
     }
   }
 
-  // Get AI suggestions for packing
-  async getAISuggestions(tripDetails) {
-    const { destination, duration, tripType, season } = tripDetails;
-
-    // Mock AI suggestions - replace with actual AI call
-    const suggestions = {
-      essentials: [
-        { name: 'Passport', quantity: 1, category: 'documents' },
-        { name: 'Travel Insurance', quantity: 1, category: 'documents' },
-        { name: 'Phone Charger', quantity: 1, category: 'electronics' },
-        { name: 'Medications', quantity: 1, category: 'health' }
-      ],
-      clothing: [
-        { name: 'T-shirts', quantity: Math.ceil(duration / 2), category: 'clothing' },
-        { name: 'Pants/Shorts', quantity: Math.ceil(duration / 3), category: 'clothing' },
-        { name: 'Underwear', quantity: duration + 2, category: 'clothing' },
-        { name: 'Socks', quantity: duration + 2, category: 'clothing' }
-      ],
-      toiletries: [
-        { name: 'Toothbrush', quantity: 1, category: 'toiletries' },
-        { name: 'Toothpaste', quantity: 1, category: 'toiletries' },
-        { name: 'Shampoo', quantity: 1, category: 'toiletries' },
-        { name: 'Sunscreen', quantity: 1, category: 'toiletries' }
-      ],
-      destination_specific: this.getDestinationSpecificItems(destination, tripType, season)
-    };
-
-    return suggestions;
-  }
-
-  // Get destination specific items
-  getDestinationSpecificItems(destination, tripType, season) {
-    const items = [];
-
-    if (tripType === 'beach' || destination.toLowerCase().includes('beach')) {
-      items.push(
-        { name: 'Swimsuit', quantity: 2, category: 'clothing' },
-        { name: 'Beach Towel', quantity: 1, category: 'accessories' },
-        { name: 'Sunglasses', quantity: 1, category: 'accessories' }
-      );
-    }
-
-    if (tripType === 'hiking' || tripType === 'adventure') {
-      items.push(
-        { name: 'Hiking Boots', quantity: 1, category: 'footwear' },
-        { name: 'Water Bottle', quantity: 1, category: 'accessories' },
-        { name: 'First Aid Kit', quantity: 1, category: 'health' }
-      );
-    }
-
-    if (season === 'winter' || destination.toLowerCase().includes('snow')) {
-      items.push(
-        { name: 'Winter Jacket', quantity: 1, category: 'clothing' },
-        { name: 'Gloves', quantity: 1, category: 'accessories' },
-        { name: 'Warm Hat', quantity: 1, category: 'accessories' }
-      );
-    }
-
-    return items;
-  }
-
-  // Add items to packing list
-  async addItems(listId, items) {
+  // Update packing item
+  async updatePackingItem(itemId, itemData) {
     try {
-      const packingItems = items.map(item => ({
-        list_id: listId,
-        ...item
-      }));
-
       const { data, error } = await supabase
         .from('packing_items')
-        .insert(packingItems)
-        .select();
+        .update(itemData)
+        .eq('id', itemId)
+        .select('*')
+        .single();
 
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error adding packing items:', error);
+      console.error('Error updating packing item:', error);
       throw error;
     }
   }
 
-  // Get packing list items
-  async getPackingListItems(listId) {
+  // Delete packing item
+  async deletePackingItem(itemId) {
+    try {
+      const { error } = await supabase
+        .from('packing_items')
+        .delete()
+        .eq('id', itemId);
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      console.error('Error deleting packing item:', error);
+      throw error;
+    }
+  }
+
+  // Get trip packing items
+  async getTripPackingItems(tripId) {
     try {
       const { data, error } = await supabase
         .from('packing_items')
-        .select(`
-          *,
-          assigned_user:assigned_to (
-            full_name,
-            username
-          )
-        `)
-        .eq('list_id', listId)
-        .order('category', { ascending: true });
+        .select('*')
+        .eq('trip_id', tripId)
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return data;
+      return data || [];
     } catch (error) {
       console.error('Error fetching packing items:', error);
+      throw error;
+    }
+  }
+
+  // Get shared packing items
+  async getSharedPackingItems(tripId) {
+    try {
+      const { data, error } = await supabase
+        .from('packing_items')
+        .select('*')
+        .eq('trip_id', tripId)
+        .eq('is_personal', false)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching shared packing items:', error);
+      throw error;
+    }
+  }
+
+  // Get personal packing items
+  async getPersonalPackingItems(tripId, userId) {
+    try {
+      const { data, error } = await supabase
+        .from('packing_items')
+        .select('*')
+        .eq('trip_id', tripId)
+        .eq('is_personal', true)
+        .eq('created_by', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching personal packing items:', error);
       throw error;
     }
   }
@@ -131,55 +109,210 @@ class PackingService {
   // Toggle item packed status
   async toggleItemPacked(itemId, isPacked) {
     try {
-      const { error } = await supabase
+      const updateData = { is_packed: isPacked };
+      
+      if (isPacked) {
+        updateData.packed_at = new Date().toISOString();
+        const { data: { user } } = await supabase.auth.getUser();
+        updateData.packed_by = user?.id || null;
+      } else {
+        updateData.packed_at = null;
+        updateData.packed_by = null;
+      }
+
+      const { data, error } = await supabase
         .from('packing_items')
-        .update({ is_packed: isPacked })
-        .eq('id', itemId);
+        .update(updateData)
+        .eq('id', itemId)
+        .select('*')
+        .single();
 
       if (error) throw error;
-      return true;
+      return data;
     } catch (error) {
-      console.error('Error updating item:', error);
+      console.error('Error toggling item packed status:', error);
       throw error;
     }
   }
 
   // Assign item to member
-  async assignItem(itemId, userId) {
-    try {
-      const { error } = await supabase
-        .from('packing_items')
-        .update({ assigned_to: userId })
-        .eq('id', itemId);
-
-      if (error) throw error;
-      return true;
-    } catch (error) {
-      console.error('Error assigning item:', error);
-      throw error;
-    }
-  }
-
-  // Get trip packing lists
-  async getTripPackingLists(tripId) {
+  async assignItemToMember(itemId, memberId) {
     try {
       const { data, error } = await supabase
-        .from('packing_lists')
-        .select(`
-          *,
-          creator:created_by (
-            full_name,
-            username
-          ),
-          packing_items (count)
-        `)
-        .eq('trip_id', tripId)
-        .order('created_at', { ascending: false });
+        .from('packing_items')
+        .update({ assigned_to: memberId })
+        .eq('id', itemId)
+        .select('*')
+        .single();
 
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error fetching packing lists:', error);
+      console.error('Error assigning item to member:', error);
+      throw error;
+    }
+  }
+
+  // Get packing categories
+  async getPackingCategories() {
+    try {
+      const { data, error } = await supabase
+        .from('packing_categories')
+        .select('*')
+        .order('sort_order', { ascending: true });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching packing categories:', error);
+      // Return default categories if database fetch fails
+      return this.getDefaultCategories();
+    }
+  }
+
+  // Get default categories (fallback)
+  getDefaultCategories() {
+    return [
+      { id: 'clothing', name: 'Clothing', icon: 'checkroom', color: '#FF6B6B' },
+      { id: 'toiletries', name: 'Toiletries', icon: 'face', color: '#4ECDC4' },
+      { id: 'electronics', name: 'Electronics', icon: 'devices', color: '#45B7D1' },
+      { id: 'documents', name: 'Documents', icon: 'description', color: '#96CEB4' },
+      { id: 'medications', name: 'Medications', icon: 'local-pharmacy', color: '#FFEAA7' },
+      { id: 'accessories', name: 'Accessories', icon: 'style', color: '#DDA0DD' },
+      { id: 'snacks', name: 'Snacks & Food', icon: 'restaurant', color: '#FFB347' },
+      { id: 'other', name: 'Other', icon: 'more-horiz', color: '#C7C7CC' }
+    ];
+  }
+
+  // Get packing statistics
+  async getPackingStats(tripId) {
+    try {
+      const { data, error } = await supabase
+        .from('packing_stats')
+        .select('*')
+        .eq('trip_id', tripId);
+
+      if (error) throw error;
+      
+      // If no data found, return default stats
+      if (!data || data.length === 0) {
+        return {
+          trip_id: tripId,
+          total_items: 0,
+          packed_items: 0,
+          shared_items: 0,
+          personal_items: 0,
+          packing_progress_percentage: 0
+        };
+      }
+      
+      return data[0];
+    } catch (error) {
+      console.error('Error fetching packing stats:', error);
+      // Calculate stats manually if view doesn't exist
+      return this.calculatePackingStats(tripId);
+    }
+  }
+
+  // Calculate packing statistics manually
+  async calculatePackingStats(tripId) {
+    try {
+      const items = await this.getTripPackingItems(tripId);
+      
+      const totalItems = items.length;
+      const packedItems = items.filter(item => item.is_packed).length;
+      const sharedItems = items.filter(item => !item.is_personal).length;
+      const personalItems = items.filter(item => item.is_personal).length;
+      const packingProgress = totalItems > 0 ? Math.round((packedItems / totalItems) * 100) : 0;
+
+      return {
+        trip_id: tripId,
+        total_items: totalItems,
+        packed_items: packedItems,
+        shared_items: sharedItems,
+        personal_items: personalItems,
+        packing_progress_percentage: packingProgress
+      };
+    } catch (error) {
+      console.error('Error calculating packing stats:', error);
+      return {
+        trip_id: tripId,
+        total_items: 0,
+        packed_items: 0,
+        shared_items: 0,
+        personal_items: 0,
+        packing_progress_percentage: 0
+      };
+    }
+  }
+
+  // Get items by category
+  async getItemsByCategory(tripId, category) {
+    try {
+      const { data, error } = await supabase
+        .from('packing_items')
+        .select('*')
+        .eq('trip_id', tripId)
+        .eq('category', category)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching items by category:', error);
+      throw error;
+    }
+  }
+
+  // Get items assigned to specific member
+  async getItemsAssignedToMember(tripId, memberId) {
+    try {
+      const { data, error } = await supabase
+        .from('packing_items')
+        .select('*')
+        .eq('trip_id', tripId)
+        .eq('assigned_to', memberId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching items assigned to member:', error);
+      throw error;
+    }
+  }
+
+  // Bulk update items (for batch operations)
+  async bulkUpdateItems(itemIds, updateData) {
+    try {
+      const { data, error } = await supabase
+        .from('packing_items')
+        .update(updateData)
+        .in('id', itemIds)
+        .select('*');
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error bulk updating items:', error);
+      throw error;
+    }
+  }
+
+  // Search packing items
+  async searchPackingItems(tripId, searchTerm) {
+    try {
+      const { data, error } = await supabase
+        .from('packing_items')
+        .select('*')
+        .eq('trip_id', tripId)
+        .or(`item_name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%,notes.ilike.%${searchTerm}%`)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error searching packing items:', error);
       throw error;
     }
   }

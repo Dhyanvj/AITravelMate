@@ -31,7 +31,20 @@ export default function BudgetModal({ visible, onClose, tripId, currentUser, onB
       setBudgetLimit(summary.budgetLimit.toString());
     } catch (error) {
       console.error('Error fetching budget summary:', error);
-      Alert.alert('Error', 'Failed to load budget information');
+      // Set default values if there's an error
+      const defaultSummary = {
+        budgetLimit: 0,
+        totalSpent: 0,
+        remaining: 0,
+        percentage: 0,
+        sharedTotal: 0,
+        personalTotal: 0,
+        isOverBudget: false,
+        warningThreshold: false
+      };
+      setBudgetSummary(defaultSummary);
+      setBudgetLimit('0');
+      Alert.alert('Error', 'Failed to load budget information. Using default values.');
     } finally {
       setLoading(false);
     }
@@ -200,8 +213,14 @@ export default function BudgetModal({ visible, onClose, tripId, currentUser, onB
           label="Budget Limit"
           placeholder="Enter your budget limit"
           value={budgetLimit}
-          onChangeText={setBudgetLimit}
-          keyboardType="numeric"
+          onChangeText={(text) => {
+            // Allow only numbers and one decimal point
+            const filteredText = text.replace(/[^0-9.]/g, '');
+            const parts = filteredText.split('.');
+            const cleanText = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : filteredText;
+            setBudgetLimit(cleanText);
+          }}
+          keyboardType="decimal-pad"
           containerStyle={styles.inputContainer}
           leftIcon={<Icon name="attach-money" type="material" size={20} color="#8E8E93" />}
           rightIcon={

@@ -1,5 +1,4 @@
 import { supabase } from './supabase/supabaseClient';
-import uuid from 'react-native-uuid';
 
 class GroupTripService {
   // Generate unique invite code
@@ -220,6 +219,188 @@ class GroupTripService {
       throw error;
     }
   }
+
+  // Update trip details
+  async updateTrip(tripId, tripData, userId) {
+    try {
+      // Check if user has permission to edit
+      const { data: member } = await supabase
+        .from('trip_members')
+        .select('role')
+        .eq('trip_id', tripId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!member || (member.role !== 'owner' && member.role !== 'admin')) {
+        throw new Error('Insufficient permissions to edit trip');
+      }
+
+      // Update trip
+      const { data: trip, error } = await supabase
+        .from('trips')
+        .update(tripData)
+        .eq('id', tripId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Log activity
+      await this.logActivity(tripId, userId, 'trip_updated', {
+        updated_fields: Object.keys(tripData)
+      });
+
+      return trip;
+    } catch (error) {
+      console.error('Error updating trip:', error);
+      throw error;
+    }
+  }
+
+  // Update trip status
+  async updateTripStatus(tripId, status, userId) {
+    try {
+      // Check if user has permission
+      const { data: member } = await supabase
+        .from('trip_members')
+        .select('role')
+        .eq('trip_id', tripId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!member || (member.role !== 'owner' && member.role !== 'admin')) {
+        throw new Error('Insufficient permissions to update trip status');
+      }
+
+      // Update status
+      const { data: trip, error } = await supabase
+        .from('trips')
+        .update({ status })
+        .eq('id', tripId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Log activity
+      await this.logActivity(tripId, userId, 'status_updated', {
+        new_status: status
+      });
+
+      return trip;
+    } catch (error) {
+      console.error('Error updating trip status:', error);
+      throw error;
+    }
+  }
+
+
+  // Delete trip (owner only)
+  async deleteTrip(tripId, userId) {
+    try {
+      // Check if user is owner
+      const { data: member } = await supabase
+        .from('trip_members')
+        .select('role')
+        .eq('trip_id', tripId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!member || member.role !== 'owner') {
+        throw new Error('Only trip owners can delete trips');
+      }
+
+      // Delete trip (cascade will handle related records)
+      const { error } = await supabase
+        .from('trips')
+        .delete()
+        .eq('id', tripId);
+
+      if (error) throw error;
+
+      return true;
+    } catch (error) {
+      console.error('Error deleting trip:', error);
+      throw error;
+    }
+  }
+
+  // Get user's trips with filters
+  async getUserTrips(userId, filters = {}) {
+    try {
+      let query = supabase
+        .from('trip_members')
+        .select(`
+          *,
+          trip:trip_id (
+            *,
+            trip_members (
+              count
+            )
+          )
+        `)
+        .eq('user_id', userId);
+
+      // Apply filters
+      if (filters.status) {
+        query = query.eq('trip.status', filters.status);
+      }
+
+      if (filters.trip_type) {
+        query = query.eq('trip.trip_type', filters.trip_type);
+      }
+
+      const { data, error } = await query.order('trip.start_date', { ascending: true });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching user trips:', error);
+      throw error;
+    }
+  }
+
+  // Leave trip (any member can leave)
+  async leaveTrip(tripId, userId) {
+    try {
+      // Check if user is a member
+      const { data: member } = await supabase
+        .from('trip_members')
+        .select('role')
+        .eq('trip_id', tripId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!member) {
+        throw new Error('You are not a member of this trip');
+      }
+
+      // Check if user is the owner
+      if (member.role === 'owner') {
+        throw new Error('Trip owners cannot leave their own trip. Transfer ownership or delete the trip instead.');
+      }
+
+      // Remove from trip members
+      const { error } = await supabase
+        .from('trip_members')
+        .delete()
+        .eq('trip_id', tripId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      // Log activity
+      await this.logActivity(tripId, userId, 'member_left', {
+        left_by: userId
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error leaving trip:', error);
+      throw error;
+    }
+  }
+
 }
 
 export default new GroupTripService();

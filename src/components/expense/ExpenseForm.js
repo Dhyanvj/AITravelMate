@@ -116,8 +116,14 @@ export default function ExpenseForm({
           label="Amount *"
           placeholder="0.00"
           value={formData.amount}
-          onChangeText={(text) => setFormData(prev => ({ ...prev, amount: text }))}
-          keyboardType="numeric"
+          onChangeText={(text) => {
+            // Allow only numbers and one decimal point
+            const filteredText = text.replace(/[^0-9.]/g, '');
+            const parts = filteredText.split('.');
+            const cleanText = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : filteredText;
+            setFormData(prev => ({ ...prev, amount: cleanText }));
+          }}
+          keyboardType="decimal-pad"
           containerStyle={styles.inputContainer}
           leftIcon={<Icon name="attach-money" type="material" size={20} color="#8E8E93" />}
         />
@@ -300,9 +306,15 @@ export default function ExpenseForm({
                     </Text>
                     <Input
                       placeholder="0.00"
-                      value={split.amount.toString()}
-                      onChangeText={(text) => handleCustomSplitChange(split.userId, text)}
-                      keyboardType="numeric"
+                      value={split.amount === 0 ? '' : split.amount.toString()}
+                      onChangeText={(text) => {
+                        // Allow only numbers and one decimal point
+                        const filteredText = text.replace(/[^0-9.]/g, '');
+                        const parts = filteredText.split('.');
+                        const cleanText = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : filteredText;
+                        handleCustomSplitChange(split.userId, cleanText);
+                      }}
+                      keyboardType="decimal-pad"
                       containerStyle={styles.customSplitInput}
                       inputStyle={styles.customSplitInputText}
                     />
@@ -443,7 +455,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
   },
   picker: {
-    height: 50,
+    height: 52.5,
   },
   participantButton: {
     flexDirection: 'row',
@@ -588,4 +600,5 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 16,
   },
+  
 });

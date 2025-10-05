@@ -1,79 +1,111 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
-  Animated
-} from 'react-native';
-import { Card, Button, Icon, Avatar, Badge } from 'react-native-elements';
-import { supabase } from '../../src/services/supabase/supabaseClient';
-import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Animated,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from 'react-native';
+import { Badge, Button, Card, Icon } from 'react-native-elements';
+import { supabase } from '../../src/services/supabase/supabaseClient';
+
+// Avatar options (same as in settings)
+const AVATAR_OPTIONS = [
+  { id: 'avatar1', name: 'Traveler', emoji: '🧳' },
+  { id: 'avatar2', name: 'Explorer', emoji: '🗺️' },
+  { id: 'avatar3', name: 'Adventurer', emoji: '🏔️' },
+  { id: 'avatar4', name: 'Photographer', emoji: '📸' },
+  { id: 'avatar5', name: 'Beach Lover', emoji: '🏖️' },
+  { id: 'avatar6', name: 'City Explorer', emoji: '🏙️' },
+  { id: 'avatar7', name: 'Nature Lover', emoji: '🌲' },
+  { id: 'avatar8', name: 'Foodie', emoji: '🍜' },
+  { id: 'avatar9', name: 'Culture Seeker', emoji: '🏛️' },
+  { id: 'avatar10', name: 'Backpacker', emoji: '🎒' },
+  { id: 'avatar11', name: 'Mountain Climber', emoji: '⛰️' },
+  { id: 'avatar12', name: 'Ocean Explorer', emoji: '🌊' },
+  { id: 'avatar13', name: 'Desert Wanderer', emoji: '🏜️' },
+  { id: 'avatar14', name: 'Forest Walker', emoji: '🌳' },
+  { id: 'avatar15', name: 'Sky Gazer', emoji: '🌌' },
+  { id: 'avatar16', name: 'Sunset Chaser', emoji: '🌅' },
+];
 
 export default function HomeScreen() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [selectedAvatar, setSelectedAvatar] = useState(null);
   const [upcomingTrips, setUpcomingTrips] = useState([]);
-  const [showQuickMenu, setShowQuickMenu] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState({
     totalTrips: 0,
-    activeTrips: 0,
-    totalExpenses: 0
+    activeTrips: 0
   });
   const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
+  const scaleAnim = useRef(new Animated.Value(0.95)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  const quickAccessItems = [
-    {
-      id: 'itinerary',
-      title: 'Itinerary',
-      icon: 'calendar',
-      color: '#4CAF50',
-      route: '/screens/itinerary'
-    },
-    {
-      id: 'discover',
-      title: 'Discover',
-      icon: 'explore',
-      color: '#FF9800',
-      route: '/screens/discover'
-    },
-    {
-      id: 'assistant',
-      title: 'AI Assistant',
-      icon: 'smart-toy',
-      color: '#9C27B0',
-      route: '/screens/chat'
-    }
-  ];
 
   useEffect(() => {
     fetchUserData();
     fetchTrips();
     fetchStats();
-  }, []);
-
-  const toggleQuickMenu = () => {
-    if (!showQuickMenu) {
-      setShowQuickMenu(true);
-      Animated.spring(fadeAnim, {
+    
+    // Start entrance animations
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
         toValue: 1,
-        tension: 20,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 50,
         friction: 7,
         useNativeDriver: true,
-      }).start();
-    } else {
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start(() => setShowQuickMenu(false));
-    }
-  };
+      }),
+    ]).start();
+    
+    // Start subtle pulse animation for action buttons
+    const startPulseAnimation = () => {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.05,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    };
+    
+    // Start pulse animation after initial load
+    setTimeout(startPulseAnimation, 1000);
+  }, []);
+
+  // Refresh data when screen comes into focus (e.g., returning from settings)
+  useFocusEffect(
+    useCallback(() => {
+      fetchUserData();
+      fetchTrips();
+      fetchStats();
+    }, [])
+  );
+
 
   const fetchUserData = async () => {
     try {
@@ -88,6 +120,15 @@ export default function HomeScreen() {
           .single();
 
         setProfile(profileData);
+
+        // Load avatar information
+        const avatarId = user.user_metadata?.avatar_id || profileData?.avatar_id;
+        if (avatarId) {
+          const avatar = AVATAR_OPTIONS.find(option => option.id === avatarId);
+          setSelectedAvatar(avatar || AVATAR_OPTIONS[0]);
+        } else {
+          setSelectedAvatar(AVATAR_OPTIONS[0]); // Default avatar
+        }
       }
     } catch (error) {
       console.error('Error fetching user data:', error);
@@ -120,31 +161,30 @@ export default function HomeScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Get all trips for the user with trip details
       const { data: trips } = await supabase
         .from('trip_members')
-        .select('trip_id')
+        .select(`
+          trip_id,
+          trip:trip_id (
+            id,
+            status
+          )
+        `)
         .eq('user_id', user.id);
 
-      const { data: expenses } = await supabase
-        .from('expense_splits')
-        .select('amount_owed')
-        .eq('user_id', user.id);
-
-      const totalExpenses = expenses?.reduce((sum, exp) => sum + parseFloat(exp.amount_owed || 0), 0) || 0;
+      const totalTrips = trips?.length || 0;
+      const activeTrips = trips?.filter(t => t.trip?.status !== 'completed' && t.trip?.status !== 'cancelled').length || 0;
 
       setStats({
-        totalTrips: trips?.length || 0,
-        activeTrips: upcomingTrips.filter(t => t.trip?.status !== 'completed').length,
-        totalExpenses: totalExpenses
+        totalTrips,
+        activeTrips
       });
     } catch (error) {
       console.error('Error fetching stats:', error);
     }
   };
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -161,23 +201,19 @@ export default function HomeScreen() {
       >
         <View style={styles.headerTop}>
           <View style={styles.profileSection}>
-            <Avatar
-              rounded
-              size="medium"
-              title={profile?.full_name?.charAt(0) || user?.email?.charAt(0)?.toUpperCase() || 'U'}
-              containerStyle={styles.avatar}
-            />
+            <View style={styles.avatarContainer}>
+              <Text style={styles.avatarEmoji}>
+                {selectedAvatar?.emoji || '🧳'}
+              </Text>
+            </View>
             <View style={styles.welcomeText}>
               <Text style={styles.greeting}>Welcome back,</Text>
               <Text style={styles.userName}>
-                {profile?.full_name || user?.email?.split('@')[0] || 'User'}!
+                {profile?.full_name || user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'User'}!
               </Text>
             </View>
           </View>
 
-          <TouchableOpacity onPress={toggleQuickMenu} style={styles.menuButton}>
-            <Icon name="apps" type="material" color="#fff" size={28} />
-          </TouchableOpacity>
         </View>
 
         <View style={styles.statsContainer}>
@@ -189,10 +225,6 @@ export default function HomeScreen() {
             <Text style={styles.statNumber}>{stats.activeTrips}</Text>
             <Text style={styles.statLabel}>Active</Text>
           </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>${stats.totalExpenses.toFixed(0)}</Text>
-            <Text style={styles.statLabel}>Expenses</Text>
-          </View>
         </View>
       </LinearGradient>
 
@@ -200,9 +232,21 @@ export default function HomeScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
+        contentContainerStyle={styles.scrollContent}
       >
         {/* Active Trips */}
-        <Card containerStyle={styles.card}>
+        <Animated.View
+          style={[
+            {
+              opacity: fadeAnim,
+              transform: [
+                { translateY: slideAnim },
+                { scale: scaleAnim }
+              ]
+            }
+          ]}
+        >
+          <Card containerStyle={styles.card}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Active Trips</Text>
             <TouchableOpacity onPress={() => router.push('/(tabs)/group-trips')}>
@@ -245,21 +289,38 @@ export default function HomeScreen() {
               />
             </View>
           )}
-        </Card>
+          </Card>
+        </Animated.View>
 
         {/* Quick Actions */}
-        <Card containerStyle={styles.card}>
+        <Animated.View
+          style={[
+            {
+              opacity: fadeAnim,
+              transform: [
+                { translateY: slideAnim.interpolate({
+                  inputRange: [0, 50],
+                  outputRange: [0, 30]
+                })},
+                { scale: scaleAnim }
+              ]
+            }
+          ]}
+        >
+          <Card containerStyle={styles.card}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.quickActions}>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => router.push('/(tabs)/planning')}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: '#4CAF50' }]}>
-                <Icon name="add" type="material" color="#fff" size={24} />
-              </View>
-              <Text style={styles.actionText}>New Trip</Text>
-            </TouchableOpacity>
+            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => router.push('/(tabs)/planning')}
+              >
+                <View style={[styles.actionIcon, { backgroundColor: '#4CAF50' }]}>
+                  <Icon name="add" type="material" color="#fff" size={24} />
+                </View>
+                <Text style={styles.actionText}>New Trip</Text>
+              </TouchableOpacity>
+            </Animated.View>
 
             <TouchableOpacity
               style={styles.actionButton}
@@ -273,99 +334,19 @@ export default function HomeScreen() {
 
             <TouchableOpacity
               style={styles.actionButton}
-              onPress={() => router.push('/expenses')}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: '#2196F3' }]}>
-                <Icon name="attach-money" type="material" color="#fff" size={24} />
-              </View>
-              <Text style={styles.actionText}>Expenses</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => router.push('/packing')}
+              onPress={() => router.push('/screens/chat')}
             >
               <View style={[styles.actionIcon, { backgroundColor: '#9C27B0' }]}>
-                <Icon name="luggage" type="material" color="#fff" size={24} />
+                <Icon name="smart-toy" type="material" color="#fff" size={24} />
               </View>
-              <Text style={styles.actionText}>Packing</Text>
+              <Text style={styles.actionText}>AI Assistant</Text>
             </TouchableOpacity>
           </View>
-        </Card>
+          </Card>
+        </Animated.View>
 
-        {/* Sign Out Button */}
-        <Card containerStyle={[styles.card, styles.lastCard]}>
-          <Button
-            title="Sign Out"
-            icon={<Icon name="logout" type="material" color="#fff" size={20} />}
-            buttonStyle={styles.signOutButton}
-            onPress={handleSignOut}
-          />
-        </Card>
       </ScrollView>
 
-      {/* Quick Access Menu */}
-      {showQuickMenu && (
-        <Animated.View
-          style={[
-            styles.quickMenuOverlay,
-            {
-              opacity: fadeAnim,
-            }
-          ]}
-        >
-          <TouchableOpacity
-            style={styles.overlayTouchable}
-            activeOpacity={1}
-            onPress={toggleQuickMenu}
-          />
-          <Animated.View
-            style={[
-              styles.quickMenuContainer,
-              {
-                transform: [{
-                  scale: fadeAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.8, 1],
-                  })
-                }],
-                opacity: fadeAnim,
-              }
-            ]}
-          >
-            {quickAccessItems.map((item, index) => (
-              <Animated.View
-                key={item.id}
-                style={[
-                  styles.quickMenuItemWrapper,
-                  {
-                    opacity: fadeAnim,
-                    transform: [{
-                      translateY: fadeAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [20, 0],
-                      })
-                    }]
-                  }
-                ]}
-              >
-                <TouchableOpacity
-                  style={styles.quickMenuItem}
-                  onPress={() => {
-                    toggleQuickMenu();
-                    router.push(item.route);
-                  }}
-                >
-                  <View style={[styles.quickMenuIcon, { backgroundColor: item.color }]}>
-                    <Icon name={item.icon} type="material" color="#fff" size={20} />
-                  </View>
-                  <Text style={styles.quickMenuText}>{item.title}</Text>
-                </TouchableOpacity>
-              </Animated.View>
-            ))}
-          </Animated.View>
-        </Animated.View>
-      )}
     </View>
   );
 }
@@ -391,8 +372,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  avatar: {
+  avatarContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  avatarEmoji: {
+    fontSize: 24,
   },
   welcomeText: {
     marginLeft: 12,
@@ -406,11 +400,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 20,
     fontWeight: 'bold',
-  },
-  menuButton: {
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   statsContainer: {
     flexDirection: 'row',
@@ -434,17 +423,23 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   card: {
-    borderRadius: 15,
+    borderRadius: 20,
     marginHorizontal: 15,
     marginTop: 15,
-    elevation: 3,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.05)',
   },
   lastCard: {
     marginBottom: 20,
+  },
+  scrollContent: {
+    paddingBottom: 30,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -464,9 +459,16 @@ const styles = StyleSheet.create({
   },
   tripCard: {
     backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    padding: 15,
+    borderRadius: 16,
+    padding: 18,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.05)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   tripCardContent: {
     flexDirection: 'row',
@@ -522,72 +524,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   actionIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 4,
   },
   actionText: {
-    fontSize: 12,
-    color: '#666',
-  },
-  signOutButton: {
-    backgroundColor: '#ff4444',
-    borderRadius: 25,
-  },
-  quickMenuOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 1000,
-  },
-  overlayTouchable: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  quickMenuContainer: {
-    position: 'absolute',
-    top: 80,
-    right: 20,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 10,
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
-  quickMenuItemWrapper: {
-    marginVertical: 2,
-  },
-  quickMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 15,
-    minWidth: 180,
-    borderRadius: 8,
-  },
-  quickMenuIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  quickMenuText: {
-    fontSize: 15,
-    color: '#333',
+    fontSize: 13,
+    color: '#555',
     fontWeight: '500',
+    textAlign: 'center',
   },
 });

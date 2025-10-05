@@ -26,13 +26,6 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "Allow AITravelMate to use your location for personalized recommendations."
-        }
-      ]
-    ]
+    "plugins": []
   }
 }

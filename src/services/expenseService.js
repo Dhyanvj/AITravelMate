@@ -197,7 +197,7 @@ class ExpenseService {
   getCategories() {
     return [
       { id: 'food', label: 'Food & Drinks', icon: 'restaurant', color: '#FF6B6B' },
-      { id: 'transport', label: 'Transportation', icon: 'car', color: '#4ECDC4' },
+      { id: 'transport', label: 'Transportation', icon: 'directions-car', color: '#4ECDC4' },
       { id: 'accommodation', label: 'Accommodation', icon: 'hotel', color: '#45B7D1' },
       { id: 'activities', label: 'Activities', icon: 'hiking', color: '#96CEB4' },
       { id: 'shopping', label: 'Shopping', icon: 'shopping-bag', color: '#FFEAA7' },
@@ -245,34 +245,57 @@ class ExpenseService {
   async getUserBudgetSummary(tripId, userId) {
     try {
       // Get user's budget limit for this trip
-      const { data: budgetData } = await supabase
+      const { data: budgetData, error: budgetError } = await supabase
         .from('trip_budgets')
         .select('*')
         .eq('trip_id', tripId)
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
 
-      // Get user's total spending (shared + personal)
-      const { data: sharedExpenses } = await supabase
-        .from('expense_splits')
-        .select('amount_owed')
-        .eq('user_id', userId)
-        .in('expense_id', 
-          supabase
-            .from('expenses')
-            .select('id')
-            .eq('trip_id', tripId)
-            .eq('is_personal', false)
-        );
+      if (budgetError) {
+        console.error('Error fetching budget data:', budgetError);
+      }
 
-      const { data: personalExpenses } = await supabase
+      // First, get all shared expenses for this trip
+      const { data: sharedExpenseIds, error: sharedIdsError } = await supabase
+        .from('expenses')
+        .select('id')
+        .eq('trip_id', tripId)
+        .eq('is_personal', false);
+
+      if (sharedIdsError) {
+        console.error('Error fetching shared expense IDs:', sharedIdsError);
+      }
+
+      // Then get user's splits for those shared expenses
+      let sharedTotal = 0;
+      if (sharedExpenseIds && sharedExpenseIds.length > 0) {
+        const expenseIds = sharedExpenseIds.map(exp => exp.id);
+        const { data: sharedExpenses, error: sharedError } = await supabase
+          .from('expense_splits')
+          .select('amount_owed')
+          .eq('user_id', userId)
+          .in('expense_id', expenseIds);
+
+        if (sharedError) {
+          console.error('Error fetching shared expenses:', sharedError);
+        } else {
+          sharedTotal = sharedExpenses?.reduce((sum, exp) => sum + parseFloat(exp.amount_owed || 0), 0) || 0;
+        }
+      }
+
+      // Get user's personal expenses
+      const { data: personalExpenses, error: personalError } = await supabase
         .from('expenses')
         .select('amount')
         .eq('trip_id', tripId)
         .eq('paid_by', userId)
         .eq('is_personal', true);
 
-      const sharedTotal = sharedExpenses?.reduce((sum, exp) => sum + parseFloat(exp.amount_owed || 0), 0) || 0;
+      if (personalError) {
+        console.error('Error fetching personal expenses:', personalError);
+      }
+
       const personalTotal = personalExpenses?.reduce((sum, exp) => sum + parseFloat(exp.amount || 0), 0) || 0;
       const totalSpent = sharedTotal + personalTotal;
 
@@ -306,6 +329,8 @@ class ExpenseService {
           user_id: userId,
           budget_limit: budgetLimit,
           updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'trip_id,user_id'
         })
         .select()
         .single();
@@ -418,24 +443,256 @@ class ExpenseService {
     try {
       const { data, error } = await supabase
         .from('debt_settlements')
+        .select('*')
+        .eq('trip_id', tripId)
+        .order('settled_at', { ascending: false });
+
+      if (error) throw error;
+      
+      // Get user details separately
+      if (data && data.length > 0) {
+        const userIds = [...new Set([
+          ...data.map(d => d.from_user_id),
+          ...data.map(d => d.to_user_id)
+        ])];
+        
+        const { data: users, error: usersError } = await supabase
+          .from('profiles')
+          .select('id, full_name, username')
+          .in('id', userIds);
+        
+        if (usersError) {
+          console.error('Error fetching user details:', usersError);
+          return data; // Return data without user details if there's an error
+        }
+        
+        // Map user details to settlements
+        return data.map(settlement => ({
+          ...settlement,
+          from_user: users.find(u => u.id === settlement.from_user_id),
+          to_user: users.find(u => u.id === settlement.to_user_id)
+        }));
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('Error fetching settlement history:', error);
+      throw error;
+    }
+  }
+
+  // Calculate how much money others owe the current user
+  calculateTotalOwedToMe(expenses, currentUserId) {
+    if (!expenses || expenses.length === 0) {
+      return 0;
+    }
+
+    let totalOwed = 0;
+
+    expenses.forEach(expense => {
+      if (expense.paid_by === currentUserId && !expense.is_personal) {
+        const numberOfParticipants = expense.expense_splits ? expense.expense_splits.length : 0;
+        
+        if (numberOfParticipants > 1) {
+          const myShare = expense.amount / numberOfParticipants;
+          const othersShare = expense.amount - myShare;
+          totalOwed += othersShare;
+        }
+      }
+    });
+
+    return parseFloat(totalOwed.toFixed(2));
+  }
+
+  // Calculate how much the current user owes to others
+  calculateTotalIowe(expenses, currentUserId) {
+    if (!expenses || expenses.length === 0) {
+      return 0;
+    }
+
+    let totalIOwe = 0;
+
+    expenses.forEach(expense => {
+      if (expense.paid_by !== currentUserId && !expense.is_personal) {
+        const userSplit = expense.expense_splits?.find(split => split.user_id === currentUserId);
+        if (userSplit) {
+          totalIOwe += parseFloat(userSplit.amount_owed || 0);
+        }
+      }
+    });
+
+    return parseFloat(totalIOwe.toFixed(2));
+  }
+
+  // Get detailed debt breakdown for current user
+  async getDetailedDebtBreakdown(tripId, currentUserId) {
+    try {
+      const expenses = await this.getTripExpenses(tripId);
+      
+      const youOweToOthers = [];
+      const othersOweToYou = [];
+      let totalYouOwe = 0;
+      let totalOwedToYou = 0;
+
+      // Track individual member balances
+      const memberBalances = {};
+
+      expenses.forEach(expense => {
+        if (expense.is_personal) return;
+
+        const userSplit = expense.expense_splits?.find(split => split.user_id === currentUserId);
+        const paidByUser = expense.paid_by_user;
+        
+        if (expense.paid_by === currentUserId) {
+          // I paid for this expense - others owe me
+          const myShare = expense.amount / expense.expense_splits.length;
+          const othersShare = expense.amount - myShare;
+          
+          if (othersShare > 0) {
+            othersOweToYou.push({
+              expenseId: expense.id,
+              expenseTitle: expense.title,
+              expenseAmount: expense.amount,
+              myShare: myShare,
+              othersShare: othersShare,
+              participants: expense.expense_splits.map(split => ({
+                userId: split.user_id,
+                userName: split.user?.full_name || split.user?.username,
+                amount: parseFloat(split.amount_owed)
+              })).filter(participant => participant.userId !== currentUserId)
+            });
+            totalOwedToYou += othersShare;
+
+            // Track individual amounts owed to me
+            expense.expense_splits.forEach(split => {
+              if (split.user_id !== currentUserId) {
+                const userId = split.user_id;
+                if (!memberBalances[userId]) {
+                  memberBalances[userId] = {
+                    userId: userId,
+                    userName: split.user?.full_name || split.user?.username,
+                    owesMe: 0,
+                    iOweThem: 0,
+                    netOwesMe: 0
+                  };
+                }
+                memberBalances[userId].owesMe += parseFloat(split.amount_owed);
+              }
+            });
+          }
+        } else if (userSplit) {
+          // Someone else paid and I'm a participant - I owe them
+          youOweToOthers.push({
+            expenseId: expense.id,
+            expenseTitle: expense.title,
+            expenseAmount: expense.amount,
+            amountIOwe: parseFloat(userSplit.amount_owed),
+            paidBy: {
+              userId: expense.paid_by,
+              userName: paidByUser?.full_name || paidByUser?.username
+            }
+          });
+          totalYouOwe += parseFloat(userSplit.amount_owed);
+
+          // Track individual amounts I owe
+          const paidByUserId = expense.paid_by;
+          if (!memberBalances[paidByUserId]) {
+            memberBalances[paidByUserId] = {
+              userId: paidByUserId,
+              userName: paidByUser?.full_name || paidByUser?.username,
+              owesMe: 0,
+              iOweThem: 0,
+              netOwesMe: 0
+            };
+          }
+          memberBalances[paidByUserId].iOweThem += parseFloat(userSplit.amount_owed);
+        }
+      });
+
+      // Calculate net amounts for each member
+      Object.keys(memberBalances).forEach(userId => {
+        const balance = memberBalances[userId];
+        balance.netOwesMe = balance.owesMe - balance.iOweThem;
+      });
+
+      // Calculate overall net amounts
+      const netBalance = totalOwedToYou - totalYouOwe;
+      const netYouOwe = netBalance < 0 ? Math.abs(netBalance) : 0;
+      const netOwedToYou = netBalance > 0 ? netBalance : 0;
+
+      // Separate members into those who owe me and those I owe
+      const membersWhoOweMe = Object.values(memberBalances).filter(member => member.netOwesMe > 0);
+      const membersIOwe = Object.values(memberBalances).filter(member => member.netOwesMe < 0);
+
+      return {
+        youOweToOthers,
+        othersOweToYou,
+        totalYouOwe: netYouOwe,
+        totalOwedToYou: netOwedToYou,
+        // Keep original totals for detailed breakdown
+        originalTotalYouOwe: totalYouOwe,
+        originalTotalOwedToYou: totalOwedToYou,
+        netBalance: netBalance,
+        // New per-member breakdown
+        membersWhoOweMe,
+        membersIOwe,
+        allMemberBalances: Object.values(memberBalances)
+      };
+    } catch (error) {
+      console.error('Error getting detailed debt breakdown:', error);
+      throw error;
+    }
+  }
+
+  // Mark a member as paid for their debt
+  async markMemberAsPaid(tripId, fromUserId, toUserId, amount) {
+    try {
+      const { data, error } = await supabase
+        .from('debt_payments')
+        .insert({
+          trip_id: tripId,
+          from_user_id: fromUserId,
+          to_user_id: toUserId,
+          amount: amount,
+          paid_at: new Date().toISOString(),
+          status: 'completed'
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error marking member as paid:', error);
+      throw error;
+    }
+  }
+
+  // Get payment history for a trip
+  async getPaymentHistory(tripId) {
+    try {
+      const { data, error } = await supabase
+        .from('debt_payments')
         .select(`
           *,
           from_user:from_user_id (
+            id,
             full_name,
             username
           ),
           to_user:to_user_id (
+            id,
             full_name,
             username
           )
         `)
         .eq('trip_id', tripId)
-        .order('settled_at', { ascending: false });
+        .order('paid_at', { ascending: false });
 
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error fetching settlement history:', error);
+      console.error('Error fetching payment history:', error);
       throw error;
     }
   }

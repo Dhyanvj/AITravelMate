@@ -2,15 +2,17 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View
 } from 'react-native';
-import { Button, Icon } from 'react-native-elements';
+import { Icon } from 'react-native-elements';
+import ChatTab from '../../src/components/tabs/ChatTab';
 import ExpenseTab from '../../src/components/tabs/ExpenseTab';
 import ItineraryTab from '../../src/components/tabs/ItineraryTab';
+import PackingTab from '../../src/components/tabs/PackingTab';
+import TripManagementModal from '../../src/components/TripManagementModal';
 import { supabase } from '../../src/services/supabase/supabaseClient';
 
 export default function TripDetailScreen() {
@@ -20,6 +22,7 @@ export default function TripDetailScreen() {
   const [activeTab, setActiveTab] = useState('itinerary');
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState('member');
+  const [showManagementModal, setShowManagementModal] = useState(false);
 
   useEffect(() => {
     fetchTripDetails();
@@ -60,6 +63,10 @@ export default function TripDetailScreen() {
     }
   };
 
+  const handleTripUpdated = () => {
+    fetchTripDetails();
+  };
+
   const tabs = [
     { id: 'itinerary', title: 'Itinerary', icon: 'event-note' },
     { id: 'expenses', title: 'Money', icon: 'attach-money' },
@@ -81,24 +88,12 @@ export default function TripDetailScreen() {
 
       case 'packing':
         return (
-          <View style={styles.tabContent}>
-            <Text style={styles.sectionTitle}>Packing List</Text>
-            <Text style={styles.placeholder}>Keep track of what to bring</Text>
-            <Button
-              title="Add Item"
-              buttonStyle={styles.addButton}
-              onPress={() => Alert.alert('Add Item', 'Feature coming soon')}
-            />
-          </View>
+          <PackingTab tripId={id} userRole={userRole} />
         );
 
       case 'chat':
         return (
-          <View style={styles.tabContent}>
-            <Text style={styles.sectionTitle}>Trip Chat</Text>
-            <Text style={styles.placeholder}>No messages yet</Text>
-            <Text style={styles.placeholder}>Start a conversation with your trip members</Text>
-          </View>
+          <ChatTab tripId={id} userRole={userRole} />
         );
 
       default:
@@ -127,11 +122,21 @@ export default function TripDetailScreen() {
           <Text style={styles.tripLocation}>{trip?.destination}</Text>
         </View>
 
-        <TouchableOpacity onPress={() => router.push('/screens/chat')}>
-          <View style={styles.aiButton}>
-            <Icon name="auto-awesome" type="material" color="#9C27B0" size={20} />
-          </View>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {(userRole === 'owner' || userRole === 'admin') && (
+            <TouchableOpacity 
+              onPress={() => setShowManagementModal(true)}
+              style={styles.manageButton}
+            >
+              <Icon name="settings" type="material" color="#666" size={20} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={() => router.push('/screens/chat')}>
+            <View style={styles.aiButton}>
+              <Icon name="auto-awesome" type="material" color="#9C27B0" size={20} />
+            </View>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Tab Bar */}
@@ -159,9 +164,18 @@ export default function TripDetailScreen() {
       </View>
 
       {/* Tab Content */}
-      <ScrollView style={styles.content}>
+      <View style={styles.content}>
         {renderTabContent()}
-      </ScrollView>
+      </View>
+
+      {/* Trip Management Modal */}
+      <TripManagementModal
+        visible={showManagementModal}
+        onClose={() => setShowManagementModal(false)}
+        trip={trip}
+        userRole={userRole}
+        onTripUpdated={handleTripUpdated}
+      />
     </View>
   );
 }
@@ -181,13 +195,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#fff',
     paddingHorizontal: 15,
-    paddingVertical: 15,
+    paddingTop: 50,
+    paddingBottom: 15,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
   headerCenter: {
     flex: 1,
     marginHorizontal: 15,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  manageButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
   },
   tripTitle: {
     fontSize: 18,

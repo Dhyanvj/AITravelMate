@@ -1,7 +1,11 @@
 import axios from 'axios';
 
 // You'll need to add your OpenAI API key here
+<<<<<<< HEAD
 const OPENAI_API_KEY = 'YOUR_OPENAI_KEY'; // Store this securely in environment variables
+=======
+const OPENAI_API_KEY = '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'; // Store this securely in environment variables
+>>>>>>> e8d8f0c (Add initial database schemas and features for chat, packing, and expense management. Implemented real-time messaging with WebSocket support, enhanced chat attachments, and packing list functionalities. Updated app layout and added settings tab. Removed unused features and optimized existing code for better performance.)
 
 class AIService {
   constructor() {
@@ -197,79 +201,6 @@ Ensure the activities match the interests and trip type specified. Be specific w
     }
   }
 
-  async getPlaceRecommendations(location, preferences) {
-    const prompt = `Recommend 8 amazing ${preferences.type || 'interesting'} places in ${location} that match these preferences: ${preferences.interests?.join(', ') || 'general tourism'}.
-    ${preferences.budget ? `Budget preference: ${preferences.budget}` : ''}
-
-For each place, provide a JSON array with these exact fields:
-{
-  "name": "Place name",
-  "type": "restaurant/attraction/shopping/nightlife/nature/culture/hotel/museum",
-  "category": "restaurants/attractions/shopping/nightlife/nature/culture/hotels",
-  "description": "Detailed description (2-3 sentences)",
-  "rating": 4.5,
-  "priceLevel": 1-4 (1=$, 2=$$, 3=$$$, 4=$$$$),
-  "address": "Full address",
-  "hours": "Current hours or typical schedule",
-  "tags": ["tag1", "tag2", "tag3"],
-  "estimatedCost": "Cost per person or entry fee",
-  "coordinates": {"lat": 0.0, "lng": 0.0},
-  "bestTimeToVisit": "Best time to visit",
-  "whyRecommended": "Why this place is special"
-}
-
-Focus on highly-rated, authentic local experiences. Mix popular attractions with hidden gems.`;
-
-    try {
-      const response = await axios.post(
-        `${this.baseURL}/chat/completions`,
-        {
-          model: 'gpt-3.5-turbo-1106',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a knowledgeable local travel guide. Provide practical, accurate, and exciting place recommendations. Always respond with valid JSON array only.'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          temperature: 0.7,
-          response_format: { type: "json_object" }
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      // Parse response
-      const responseContent = response.data.choices[0].message.content;
-      let places;
-
-      try {
-        const parsed = JSON.parse(responseContent);
-        // Handle if response is wrapped in an object
-        places = parsed.places || parsed.recommendations || parsed;
-      } catch (e) {
-        // If parsing fails, return mock data
-        return this.getMockPlaceRecommendations(location, preferences);
-      }
-
-      // Ensure it's an array
-      if (!Array.isArray(places)) {
-        places = [places];
-      }
-
-      return places;
-    } catch (error) {
-      console.error('Place Recommendations Error:', error);
-      return this.getMockPlaceRecommendations(location, preferences);
-    }
-  }
 
   async optimizeItinerary(currentItinerary, feedback) {
     const prompt = `Optimize this travel itinerary based on the following feedback: ${feedback}
@@ -375,95 +306,6 @@ Please provide an optimized version maintaining the same JSON structure but with
   }
 
   // Enhanced mock recommendations for testing
-  getMockPlaceRecommendations(location, preferences) {
-    const allPlaces = [
-      {
-        name: 'The Local Kitchen',
-        type: 'restaurant',
-        category: 'restaurants',
-        description: 'Farm-to-table restaurant featuring seasonal local ingredients and innovative dishes. Known for their weekend brunch and craft cocktails.',
-        rating: 4.7,
-        priceLevel: 3,
-        address: '123 Main Street',
-        hours: 'Open 11 AM - 10 PM',
-        tags: ['Farm-to-Table', 'Local Cuisine', 'Vegetarian Options'],
-        estimatedCost: '$30-50 per person',
-        coordinates: { lat: 40.7128, lng: -74.0060 },
-        bestTimeToVisit: 'Weekend brunch or weekday dinner',
-        whyRecommended: 'Perfect blend of local flavors and modern culinary techniques'
-      },
-      {
-        name: 'Historic Art Museum',
-        type: 'museum',
-        category: 'culture',
-        description: 'Stunning collection of contemporary and classical art spanning five centuries. Features rotating exhibitions and educational programs.',
-        rating: 4.8,
-        priceLevel: 2,
-        address: '456 Museum Plaza',
-        hours: 'Open 10 AM - 6 PM (Closed Mondays)',
-        tags: ['Art', 'History', 'Family-Friendly'],
-        estimatedCost: '$20 adults, $10 students',
-        coordinates: { lat: 40.7589, lng: -73.9851 },
-        bestTimeToVisit: 'Weekday mornings for fewer crowds',
-        whyRecommended: 'World-class collection with unique local artist exhibitions'
-      },
-      {
-        name: 'Sunset Beach Park',
-        type: 'nature',
-        category: 'nature',
-        description: 'Beautiful beachfront park with walking trails, picnic areas, and stunning sunset views. Popular for swimming and water sports.',
-        rating: 4.6,
-        priceLevel: 0,
-        address: 'Coastal Highway Mile 5',
-        hours: 'Open sunrise to sunset',
-        tags: ['Beach', 'Hiking', 'Photography'],
-        estimatedCost: 'Free',
-        coordinates: { lat: 40.6892, lng: -74.0445 },
-        bestTimeToVisit: 'Early morning or before sunset',
-        whyRecommended: 'Best sunset views in the area with excellent photo opportunities'
-      },
-      {
-        name: 'Night Market',
-        type: 'shopping',
-        category: 'shopping',
-        description: 'Vibrant evening market featuring local crafts, street food, and live entertainment. Over 100 vendors selling unique items.',
-        rating: 4.5,
-        priceLevel: 2,
-        address: 'Downtown Market Square',
-        hours: 'Friday-Sunday 5 PM - 11 PM',
-        tags: ['Shopping', 'Street Food', 'Local Crafts'],
-        estimatedCost: '$20-40 for food and shopping',
-        coordinates: { lat: 40.7484, lng: -73.9857 },
-        bestTimeToVisit: 'Friday evenings for live music',
-        whyRecommended: 'Authentic local experience with the best street food in town'
-      }
-    ];
-
-    // Filter based on preferences
-    let filteredPlaces = allPlaces;
-
-    if (preferences.type && preferences.type !== 'all') {
-      filteredPlaces = allPlaces.filter(p =>
-        p.category === preferences.type || p.type === preferences.type
-      );
-    }
-
-    if (preferences.budget) {
-      const budgetMap = {
-        '$': 1,
-        '$$': 2,
-        '$$$': 3,
-        '$$$$': 4
-      };
-      const maxBudget = budgetMap[preferences.budget] || 4;
-      filteredPlaces = filteredPlaces.filter(p =>
-        p.priceLevel <= maxBudget || p.priceLevel === 0
-      );
-    }
-
-    // Return up to 8 places
-    return filteredPlaces.slice(0, 8);
-  }
 }
 
 export default new AIService();

@@ -1,14 +1,14 @@
 import { format } from 'date-fns';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
-    Modal,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { Button, Card, Icon } from 'react-native-elements';
 import expenseService from '../../services/expenseService';
@@ -33,6 +33,12 @@ export default function ExpenseTab({ tripId, userRole }) {
   const [selectedExpense, setSelectedExpense] = useState(null);
   const [budgetSummary, setBudgetSummary] = useState(null);
   const [debtSummary, setDebtSummary] = useState(null);
+  const [detailedDebtBreakdown, setDetailedDebtBreakdown] = useState(null);
+  const [expandedSplits, setExpandedSplits] = useState(new Set());
+  const [expandedDebtSections, setExpandedDebtSections] = useState({
+    youOwe: false,
+    othersOwe: false
+  });
 
   // Form states
   const [expenseForm, setExpenseForm] = useState({
@@ -49,6 +55,13 @@ export default function ExpenseTab({ tripId, userRole }) {
   useEffect(() => {
     fetchData();
   }, [tripId]);
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchDetailedDebtBreakdown();
+      fetchBudgetSummary();
+    }
+  }, [currentUser]);
 
   const fetchData = async () => {
     await Promise.all([
@@ -103,6 +116,18 @@ export default function ExpenseTab({ tripId, userRole }) {
       setBudgetSummary(summary);
     } catch (error) {
       console.error('Error fetching budget summary:', error);
+      // Set default values if there's an error
+      const defaultSummary = {
+        budgetLimit: 0,
+        totalSpent: 0,
+        remaining: 0,
+        percentage: 0,
+        sharedTotal: 0,
+        personalTotal: 0,
+        isOverBudget: false,
+        warningThreshold: false
+      };
+      setBudgetSummary(defaultSummary);
     }
   };
 
@@ -115,9 +140,22 @@ export default function ExpenseTab({ tripId, userRole }) {
     }
   };
 
+  const fetchDetailedDebtBreakdown = async () => {
+    if (!currentUser) return;
+    try {
+      const breakdown = await expenseService.getDetailedDebtBreakdown(tripId, currentUser.id);
+      setDetailedDebtBreakdown(breakdown);
+    } catch (error) {
+      console.error('Error fetching detailed debt breakdown:', error);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await fetchData();
+    if (currentUser) {
+      await fetchDetailedDebtBreakdown();
+    }
     setRefreshing(false);
   };
 
@@ -178,6 +216,55 @@ export default function ExpenseTab({ tripId, userRole }) {
         }
       ]
     );
+  };
+
+  const toggleSplitDetails = (expenseId) => {
+    setExpandedSplits(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(expenseId)) {
+        newSet.delete(expenseId);
+      } else {
+        newSet.add(expenseId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleDebtSection = (section) => {
+    setExpandedDebtSections(prev => ({
+      ...prev,
+      [section]: !prev[section]
+    }));
+  };
+
+  const handleMarkAsPaid = async (userId, amount) => {
+    Alert.alert(
+      'Mark as Paid',
+      `Mark ${amount.toFixed(2)} as paid?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mark as Paid',
+          onPress: async () => {
+            try {
+              await expenseService.markMemberAsPaid(tripId, userId, currentUser.id, amount);
+              Alert.alert('Success', 'Payment marked as completed');
+              // Refresh the debt breakdown
+              await fetchDetailedDebtBreakdown();
+            } catch (error) {
+              console.error('Error marking as paid:', error);
+              Alert.alert('Error', 'Failed to mark as paid');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const canEditExpense = (expense) => {
+    if (!currentUser) return false;
+    // Allow if user is the trip owner or the expense creator
+    return userRole === 'owner' || expense.paid_by === currentUser.id;
   };
 
   const saveExpense = async () => {
@@ -265,39 +352,56 @@ export default function ExpenseTab({ tripId, userRole }) {
 
         {!expense.is_personal && expense.expense_splits && (
           <View style={styles.splitsContainer}>
-            <Text style={styles.splitsTitle}>Split between:</Text>
-            {expense.expense_splits.map((split, index) => {
-              const user = members.find(member => member.user_id === split.user_id);
-              return (
-                <View key={index} style={styles.splitItem}>
-                  <Text style={styles.splitUser}>
-                    {user?.profiles?.full_name || user?.profiles?.username}
-                  </Text>
-                  <Text style={styles.splitAmount}>
-                    ${parseFloat(split.amount_owed).toFixed(2)}
-                  </Text>
-                </View>
-              );
-            })}
+            <TouchableOpacity 
+              style={styles.splitsHeader}
+              onPress={() => toggleSplitDetails(expense.id)}
+            >
+              <Text style={styles.splitsTitle}>Split between:</Text>
+              <Icon 
+                name={expandedSplits.has(expense.id) ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} 
+                type="material" 
+                size={20} 
+                color="#007AFF" 
+              />
+            </TouchableOpacity>
+            {expandedSplits.has(expense.id) && (
+              <View style={styles.splitsList}>
+                {expense.expense_splits.map((split, index) => {
+                  const user = members.find(member => member.user_id === split.user_id);
+                  return (
+                    <View key={index} style={styles.splitItem}>
+                      <Text style={styles.splitUser}>
+                        {user?.profiles?.full_name || user?.profiles?.username}
+                      </Text>
+                      <Text style={styles.splitAmount}>
+                        ${parseFloat(split.amount_owed).toFixed(2)}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
           </View>
         )}
 
-        <View style={styles.expenseActions}>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => handleEditExpense(expense)}
-          >
-            <Icon name="edit" type="material" size={16} color="#007AFF" />
-            <Text style={styles.actionText}>Edit</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => handleDeleteExpense(expense)}
-          >
-            <Icon name="delete" type="material" size={16} color="#FF3B30" />
-            <Text style={styles.actionText}>Delete</Text>
-          </TouchableOpacity>
-        </View>
+        {canEditExpense(expense) && (
+          <View style={styles.expenseActions}>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => handleEditExpense(expense)}
+            >
+              <Icon name="edit" type="material" size={16} color="#007AFF" />
+              <Text style={styles.actionText}>Edit</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => handleDeleteExpense(expense)}
+            >
+              <Icon name="delete" type="material" size={16} color="#FF3B30" />
+              <Text style={styles.actionText}>Delete</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </Card>
     );
   };
@@ -376,33 +480,144 @@ export default function ExpenseTab({ tripId, userRole }) {
   };
 
   const renderDebtSummary = () => {
-    if (!debtSummary || (debtSummary.debts.length === 0 && debtSummary.credits.length === 0)) {
+    if (!detailedDebtBreakdown) {
       return null;
     }
 
-    return (
-      <Card containerStyle={styles.debtCard}>
-        <View style={styles.debtHeader}>
-          <Icon name="account-balance" type="material" size={24} color="#007AFF" />
-          <Text style={styles.debtTitle}>Debt Summary</Text>
-          <TouchableOpacity onPress={() => setShowDebtModal(true)}>
-            <Text style={styles.viewAllText}>View All</Text>
-          </TouchableOpacity>
-        </View>
+    const { 
+      youOweToOthers, 
+      othersOweToYou, 
+      totalYouOwe, 
+      totalOwedToYou, 
+      netBalance,
+      membersWhoOweMe,
+      membersIOwe
+    } = detailedDebtBreakdown;
 
-        {debtSummary.settlements.length > 0 && (
-          <View style={styles.settlementsContainer}>
-            <Text style={styles.settlementsTitle}>Suggested Settlements:</Text>
-            {debtSummary.settlements.slice(0, 3).map((settlement, index) => (
-              <View key={index} style={styles.settlementItem}>
-                <Text style={styles.settlementText}>
-                  {settlement.fromName} owes {settlement.toName} ${settlement.amount.toFixed(2)}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-      </Card>
+    return (
+      
+      <View>
+        {/* You Owe To Others Section - Always show */}
+        <Card containerStyle={styles.debtCard}>
+          <TouchableOpacity 
+            style={styles.debtSectionHeader}
+            onPress={() => toggleDebtSection('youOwe')}
+          >
+            <View style={styles.debtSectionTitleContainer}>
+              <Icon name="arrow-upward" type="material" size={24} color="#FF3B30" />
+              <Text style={styles.debtSectionTitle}>You Owe To Others</Text>
+            </View>
+            <View style={styles.debtSectionAmountContainer}>
+              <Text style={[
+                styles.debtSectionAmount, 
+                { color: '#FF3B30' },
+                totalYouOwe >= 1000 && styles.largeAmountText
+              ]}>
+                ${totalYouOwe.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Text>
+              <Icon 
+                name={expandedDebtSections.youOwe ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} 
+                type="material" 
+                size={20} 
+                color="#8E8E93" 
+              />
+            </View>
+          </TouchableOpacity>
+
+          {expandedDebtSections.youOwe && (
+            <View style={styles.debtDetailsContainer}>
+              <Text style={styles.netBalanceText}>
+                Net amount you owe after all settlements
+              </Text>
+              
+              {membersIOwe.length > 0 ? (
+                <View style={styles.breakdownContainer}>
+                  <Text style={styles.breakdownTitle}>Per Member Breakdown:</Text>
+                  {membersIOwe.map((member, index) => (
+                    <View key={index} style={styles.memberDebtItem}>
+                      <View style={styles.memberDebtHeader}>
+                        <Text style={styles.memberDebtName}>{member.userName}</Text>
+                        <Text style={styles.memberDebtAmount}>
+                          ${Math.abs(member.netOwesMe).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </Text>
+                      </View>
+                      <Text style={styles.memberDebtDetails}>
+                        You owe {member.userName} after netting all expenses
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.noDebtsText}>You don't owe anyone anything!</Text>
+              )}
+            </View>
+          )}
+        </Card>
+
+        {/* Others Owe To You Section - Always show */}
+        <Card containerStyle={styles.debtCard}>
+          <TouchableOpacity 
+            style={styles.debtSectionHeader}
+            onPress={() => toggleDebtSection('othersOwe')}
+          >
+            <View style={styles.debtSectionTitleContainer}>
+              <Icon name="arrow-downward" type="material" size={24} color="#34C759" />
+              <Text style={styles.debtSectionTitle}>Others Owe To You</Text>
+            </View>
+            <View style={styles.debtSectionAmountContainer}>
+              <Text style={[
+                styles.debtSectionAmount, 
+                { color: '#34C759' },
+                totalOwedToYou >= 1000 && styles.largeAmountText
+              ]}>
+                ${totalOwedToYou.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Text>
+              <Icon 
+                name={expandedDebtSections.othersOwe ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} 
+                type="material" 
+                size={20} 
+                color="#8E8E93" 
+              />
+            </View>
+          </TouchableOpacity>
+
+          {expandedDebtSections.othersOwe && (
+            <View style={styles.debtDetailsContainer}>
+              <Text style={styles.netBalanceText}>
+                Net amount others owe you after all settlements
+              </Text>
+              
+              {membersWhoOweMe.length > 0 ? (
+                <View style={styles.breakdownContainer}>
+                  <Text style={styles.breakdownTitle}>Per Member Breakdown:</Text>
+                  {membersWhoOweMe.map((member, index) => (
+                    <View key={index} style={styles.memberDebtItem}>
+                      <View style={styles.memberDebtHeader}>
+                        <Text style={styles.memberDebtName}>{member.userName}</Text>
+                        <Text style={styles.memberDebtAmount}>
+                          ${member.netOwesMe.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </Text>
+                      </View>
+                      <Text style={styles.memberDebtDetails}>
+                        {member.userName} owes you after netting all expenses
+                      </Text>
+                      <TouchableOpacity 
+                        style={styles.markPaidButton}
+                        onPress={() => handleMarkAsPaid(member.userId, member.netOwesMe)}
+                      >
+                        <Icon name="check" type="material" size={16} color="white" />
+                        <Text style={styles.markPaidText}>Mark as Paid</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.noDebtsText}>No one owes you anything!</Text>
+              )}
+            </View>
+          )}
+        </Card>
+      </View>
     );
   };
 
@@ -447,6 +662,7 @@ export default function ExpenseTab({ tripId, userRole }) {
       {/* Content */}
       <ScrollView
         style={styles.content}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -599,6 +815,9 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
+  scrollContent: {
+    paddingBottom: 30,
+  },
   expenseCard: {
     marginBottom: 16,
     borderRadius: 12,
@@ -666,11 +885,19 @@ const styles = StyleSheet.create({
   splitsContainer: {
     marginBottom: 12,
   },
+  splitsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   splitsTitle: {
     fontSize: 14,
     fontWeight: '600',
     color: '#000',
-    marginBottom: 8,
+  },
+  splitsList: {
+    marginTop: 8,
   },
   splitItem: {
     flexDirection: 'row',
@@ -779,39 +1006,91 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 12,
   },
-  debtHeader: {
+  debtSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    minHeight: 48,
+  },
+  debtSectionTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
+    flex: 1,
+    marginRight: 12,
   },
-  debtTitle: {
+  debtSectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#000',
     marginLeft: 8,
+    flexShrink: 1,
   },
-  viewAllText: {
-    fontSize: 14,
-    color: '#007AFF',
+  debtSectionAmountContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+    minWidth: 100,
+    maxWidth: 150,
+    justifyContent: 'flex-end',
   },
-  settlementsContainer: {
+  debtSectionAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginRight: 8,
+    textAlign: 'right',
+    flexShrink: 1,
+    numberOfLines: 1,
+  },
+  debtDetailsContainer: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E5EA',
+  },
+  debtItem: {
     marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F7',
   },
-  settlementsTitle: {
-    fontSize: 14,
+  debtItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  debtItemTitle: {
+    fontSize: 16,
     fontWeight: '600',
     color: '#000',
+    flex: 1,
+  },
+  debtItemAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#007AFF',
+  },
+  debtItemDetails: {
+    fontSize: 14,
+    color: '#8E8E93',
     marginBottom: 8,
   },
-  settlementItem: {
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5EA',
+  participantsList: {
+    marginTop: 8,
   },
-  settlementText: {
+  participantText: {
     fontSize: 14,
-    color: '#000',
+    color: '#8E8E93',
+    marginBottom: 2,
+  },
+  noDebtsText: {
+    fontSize: 16,
+    color: '#8E8E93',
+    textAlign: 'center',
+    fontStyle: 'italic',
+    paddingVertical: 16,
   },
   emptyState: {
     alignItems: 'center',
@@ -867,5 +1146,89 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     textAlign: 'center',
     marginTop: 32,
+  },
+  netBalanceText: {
+    fontSize: 14,
+    color: '#8E8E93',
+    textAlign: 'center',
+    marginBottom: 16,
+    fontStyle: 'italic',
+  },
+  breakdownContainer: {
+    marginTop: 8,
+  },
+  breakdownTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 12,
+  },
+  balancedContainer: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 16,
+  },
+  balancedTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#34C759',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  balancedText: {
+    fontSize: 16,
+    color: '#8E8E93',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  memberDebtItem: {
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F7',
+  },
+  memberDebtHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  memberDebtName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    flex: 1,
+  },
+  memberDebtAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#007AFF',
+    textAlign: 'right',
+    flexShrink: 1,
+    minWidth: 80,
+  },
+  memberDebtDetails: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginBottom: 8,
+  },
+  markPaidButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#34C759',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  markPaidText: {
+    fontSize: 14,
+    color: 'white',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  largeAmountText: {
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

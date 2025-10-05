@@ -1,33 +1,69 @@
-import React, { useState, useEffect, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
   Alert,
+  Animated,
+  Dimensions,
   FlatList,
-  Keyboard
+  Keyboard,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
-import { Card, Icon, Avatar, Badge, Button, Header } from 'react-native-elements';
-import { supabase } from '../../src/services/supabase/supabaseClient';
+import { Avatar, Icon } from 'react-native-elements';
 import AIService from '../../src/services/ai/aiService';
-import { LinearGradient } from 'expo-linear-gradient';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../../src/services/supabase/supabaseClient';
+
+// Avatar options (same as in settings)
+const AVATAR_OPTIONS = [
+  { id: 'avatar1', name: 'Traveler', emoji: '🧳' },
+  { id: 'avatar2', name: 'Explorer', emoji: '🗺️' },
+  { id: 'avatar3', name: 'Adventurer', emoji: '🏔️' },
+  { id: 'avatar4', name: 'Photographer', emoji: '📸' },
+  { id: 'avatar5', name: 'Beach Lover', emoji: '🏖️' },
+  { id: 'avatar6', name: 'City Explorer', emoji: '🏙️' },
+  { id: 'avatar7', name: 'Nature Lover', emoji: '🌲' },
+  { id: 'avatar8', name: 'Foodie', emoji: '🍜' },
+  { id: 'avatar9', name: 'Culture Seeker', emoji: '🏛️' },
+  { id: 'avatar10', name: 'Backpacker', emoji: '🎒' },
+  { id: 'avatar11', name: 'Mountain Climber', emoji: '⛰️' },
+  { id: 'avatar12', name: 'Ocean Explorer', emoji: '🌊' },
+  { id: 'avatar13', name: 'Desert Wanderer', emoji: '🏜️' },
+  { id: 'avatar14', name: 'Forest Walker', emoji: '🌳' },
+  { id: 'avatar15', name: 'Sky Gazer', emoji: '🌌' },
+  { id: 'avatar16', name: 'Sunset Chaser', emoji: '🌅' },
+];
+
+const { height: screenHeight } = Dimensions.get('window');
 
 export default function ChatScreen() {
+  const router = useRouter();
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
+  const [selectedAvatar, setSelectedAvatar] = useState(null);
   const [userTrips, setUserTrips] = useState([]);
   const [selectedContext, setSelectedContext] = useState(null);
   const [showQuickActions, setShowQuickActions] = useState(true);
+  const [isConnected, setIsConnected] = useState(true);
+  const [typingIndicator, setTypingIndicator] = useState(false);
+  const [showTripSelector, setShowTripSelector] = useState(false);
+  const [refreshingTrips, setRefreshingTrips] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const scrollViewRef = useRef();
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const inputFocusAnim = useRef(new Animated.Value(0)).current;
+  const sendButtonAnim = useRef(new Animated.Value(0)).current;
 
   // Quick action suggestions
   const quickActions = [
@@ -64,6 +100,24 @@ export default function ChatScreen() {
     initializeChat();
     loadChatHistory();
     fetchUserData();
+    
+    // Start entrance animations
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    return () => {
+      // Cleanup if needed
+    };
   }, []);
 
   useEffect(() => {
@@ -117,15 +171,43 @@ export default function ChatScreen() {
 
       setUserProfile(profile);
 
-      // Fetch user trips for context
-      const { data: trips } = await supabase
-        .from('trips')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('start_date', { ascending: true })
-        .limit(5);
+      // Load avatar information
+      const avatarId = user.user_metadata?.avatar_id || profile?.avatar_id;
+      if (avatarId) {
+        const avatar = AVATAR_OPTIONS.find(option => option.id === avatarId);
+        setSelectedAvatar(avatar || AVATAR_OPTIONS[0]);
+      } else {
+        setSelectedAvatar(AVATAR_OPTIONS[0]); // Default avatar
+      }
 
-      setUserTrips(trips || []);
+      // Fetch user trips for context using trip_members table
+      const { data: tripMembers, error: tripError } = await supabase
+        .from('trip_members')
+        .select(`
+          *,
+          trip:trip_id (
+            id,
+            title,
+            destination,
+            start_date,
+            end_date,
+            trip_type,
+            status,
+            description
+          )
+        `)
+        .eq('user_id', user.id);
+
+      if (tripError) {
+        console.error('Error fetching trips:', tripError);
+      }
+
+      // Extract trips from trip members and filter for active trips
+      const trips = tripMembers?.map(member => member.trip)
+        .filter(trip => trip && trip.status !== 'completed' && trip.status !== 'cancelled')
+        .sort((a, b) => new Date(a.start_date) - new Date(b.start_date)) || [];
+      console.log('Fetched trips for chat:', trips);
+      setUserTrips(trips);
     } catch (error) {
       console.error('Error fetching user data:', error);
     }
@@ -153,6 +235,7 @@ export default function ChatScreen() {
     setInputText('');
     setIsTyping(true);
     setShowQuickActions(false);
+    setTypingIndicator(true);
     Keyboard.dismiss();
 
     try {
@@ -186,6 +269,7 @@ export default function ChatScreen() {
       setMessages([...updatedMessages, errorMessage]);
     } finally {
       setIsTyping(false);
+      setTypingIndicator(false);
     }
   };
 
@@ -201,7 +285,16 @@ export default function ChatScreen() {
         dates: `${trip.start_date} to ${trip.end_date}`,
         type: trip.trip_type
       })),
-      selectedContext: selectedContext
+      selectedTrip: selectedContext ? {
+        id: selectedContext.id,
+        title: selectedContext.title,
+        destination: selectedContext.destination,
+        startDate: selectedContext.start_date,
+        endDate: selectedContext.end_date,
+        tripType: selectedContext.trip_type,
+        description: selectedContext.description,
+        status: selectedContext.status
+      } : null
     };
 
     // Detect intent from user input
@@ -215,8 +308,6 @@ export default function ChatScreen() {
         return await handleWeatherQuery(intent.data);
       case 'currency':
         return await handleCurrencyConversion(intent.data);
-      case 'recommendation':
-        return await handleRecommendation(intent.data, context);
       case 'trip_planning':
         return await handleTripPlanning(intent.data, context);
       case 'general':
@@ -243,10 +334,6 @@ export default function ChatScreen() {
       return { type: 'currency', data: input };
     }
 
-    // Recommendation detection
-    if (lowerInput.includes('recommend') || lowerInput.includes('suggest') || lowerInput.includes('best') || lowerInput.includes('where should')) {
-      return { type: 'recommendation', data: input };
-    }
 
     // Trip planning detection
     if (lowerInput.includes('plan') || lowerInput.includes('itinerary') || lowerInput.includes('trip') || lowerInput.includes('travel to')) {
@@ -291,44 +378,36 @@ export default function ChatScreen() {
     };
   };
 
-  const handleRecommendation = async (query, context) => {
-    const response = await AIService.getPlaceRecommendations(
-      context.currentTrips?.[0]?.destination || 'your area',
-      { interests: context.user?.preferences?.interests || [] }
-    );
-
-    const places = response.slice(0, 3);
-    let recommendationText = "Here are my top recommendations:\n\n";
-
-    places.forEach((place, index) => {
-      recommendationText += `${index + 1}. **${place.name}**\n`;
-      recommendationText += `   📍 ${place.address || 'Location available'}\n`;
-      recommendationText += `   ⭐ Rating: ${place.rating || 'N/A'}\n`;
-      recommendationText += `   💰 ${place.estimatedCost || 'Price varies'}\n`;
-      recommendationText += `   ${place.description}\n\n`;
-    });
-
-    return {
-      text: recommendationText + "Would you like more details about any of these places?",
-      type: 'recommendation',
-      data: places,
-      suggestions: ['Show on map', 'More recommendations', 'Filter by budget']
-    };
-  };
 
   const handleTripPlanning = async (query, context) => {
-    return {
-      text: `I'd be happy to help you plan your trip! Based on your preferences, here's what I suggest:\n\n📅 **Trip Planning Checklist:**\n\n1. **Destination Research** ✓\n2. **Book Flights** - Best deals on Tuesday/Wednesday\n3. **Accommodation** - Book 3-4 weeks in advance\n4. **Activities** - Pre-book popular attractions\n5. **Travel Insurance** - Don't forget this!\n6. **Documents** - Check passport validity\n\nWould you like me to:\n• Generate a detailed itinerary?\n• Search for flights?\n• Find hotels?\n• Suggest activities?`,
-      type: 'trip_planning',
-      suggestions: ['Create itinerary', 'Search flights', 'Find hotels', 'Local activities']
-    };
+    const selectedTrip = context.selectedTrip;
+    
+    if (selectedTrip) {
+      return {
+        text: `I'd be happy to help you with your trip to ${selectedTrip.destination}! Here's what I can assist you with for "${selectedTrip.title}":\n\n📅 **Trip Details:**\n• Destination: ${selectedTrip.destination}\n• Dates: ${new Date(selectedTrip.startDate).toLocaleDateString()} - ${new Date(selectedTrip.endDate).toLocaleDateString()}\n• Type: ${selectedTrip.tripType}\n\n🎯 **What I can help you with:**\n• Weather forecast for your dates\n• Local attractions and activities\n• Restaurant recommendations\n• Transportation options\n• Packing suggestions\n• Cultural tips and etiquette\n\nWhat specific aspect of your trip would you like help with?`,
+        type: 'trip_planning',
+        suggestions: ['Weather forecast', 'Local attractions', 'Restaurant recommendations', 'Transportation options']
+      };
+    } else {
+      return {
+        text: `I'd be happy to help you plan your trip! Based on your preferences, here's what I suggest:\n\n📅 **Trip Planning Checklist:**\n\n1. **Destination Research** ✓\n2. **Book Flights** - Best deals on Tuesday/Wednesday\n3. **Accommodation** - Book 3-4 weeks in advance\n4. **Activities** - Pre-book popular attractions\n5. **Travel Insurance** - Don't forget this!\n6. **Documents** - Check passport validity\n\nWould you like me to:\n• Generate a detailed itinerary?\n• Search for flights?\n• Find hotels?\n• Suggest activities?`,
+        type: 'trip_planning',
+        suggestions: ['Create itinerary', 'Search flights', 'Find hotels', 'Local activities']
+      };
+    }
   };
 
   const handleGeneralQuery = async (query, history, context) => {
     try {
+      // Build enhanced prompt with trip context
+      let enhancedQuery = query;
+      if (context.selectedTrip) {
+        enhancedQuery = `User is asking about their trip to ${context.selectedTrip.destination} (${context.selectedTrip.title}) from ${new Date(context.selectedTrip.startDate).toLocaleDateString()} to ${new Date(context.selectedTrip.endDate).toLocaleDateString()}. Trip type: ${context.selectedTrip.tripType}. User question: ${query}`;
+      }
+
       // Use AI Service to get response
       const aiResponse = await AIService.getChatResponse(
-        query,
+        enhancedQuery,
         history.slice(-10).map(msg => ({
           role: msg.sender === 'user' ? 'user' : 'assistant',
           content: msg.text
@@ -338,24 +417,30 @@ export default function ChatScreen() {
       return {
         text: aiResponse,
         type: 'text',
-        suggestions: getContextualSuggestions(query)
+        suggestions: getContextualSuggestions(query, context.selectedTrip)
       };
     } catch (error) {
       // Fallback response
       return {
-        text: getMockResponse(query),
+        text: getMockResponse(query, context.selectedTrip),
         type: 'text',
-        suggestions: getContextualSuggestions(query)
+        suggestions: getContextualSuggestions(query, context.selectedTrip)
       };
     }
   };
 
-  const getMockResponse = (query) => {
+  const getMockResponse = (query, selectedTrip) => {
     const responses = {
-      default: "I'm here to help with all your travel needs! You can ask me about destinations, flights, hotels, local attractions, translations, weather, and more. What would you like to know?",
-      greeting: "Hello! Ready for your next adventure? I can help you plan trips, find great places to visit, or answer any travel questions you have.",
+      default: selectedTrip 
+        ? `I'm here to help with your trip to ${selectedTrip.destination}! I can assist you with weather, attractions, restaurants, transportation, and more for your upcoming trip. What would you like to know?`
+        : "I'm here to help with all your travel needs! You can ask me about destinations, flights, hotels, local attractions, translations, weather, and more. What would you like to know?",
+      greeting: selectedTrip
+        ? `Hello! I'm ready to help you with your trip to ${selectedTrip.destination}. What would you like to know about your upcoming adventure?`
+        : "Hello! Ready for your next adventure? I can help you plan trips, find great places to visit, or answer any travel questions you have.",
       thanks: "You're welcome! Is there anything else you'd like to know about your travel plans?",
-      help: "I can assist you with:\n• Trip planning and itineraries\n• Flight and hotel recommendations\n• Local attractions and restaurants\n• Language translations\n• Weather forecasts\n• Currency conversion\n• Visa requirements\n• Packing tips\n• And much more!\n\nWhat would you like help with?"
+      help: selectedTrip
+        ? `I can help you with your trip to ${selectedTrip.destination}:\n• Weather forecast for your dates\n• Local attractions and activities\n• Restaurant recommendations\n• Transportation options\n• Packing suggestions\n• Cultural tips and etiquette\n\nWhat would you like help with?`
+        : "I can assist you with:\n• Trip planning and itineraries\n• Flight and hotel recommendations\n• Local attractions and restaurants\n• Language translations\n• Weather forecasts\n• Currency conversion\n• Visa requirements\n• Packing tips\n• And much more!\n\nWhat would you like help with?"
     };
 
     const lowerQuery = query.toLowerCase();
@@ -372,15 +457,26 @@ export default function ChatScreen() {
     return responses.default;
   };
 
-  const getContextualSuggestions = (query) => {
-    const suggestions = [
-      'Find nearby restaurants',
-      'Plan a day trip',
-      'Get travel tips',
-      'Check weather'
-    ];
-
-    return suggestions.slice(0, 3);
+  const getContextualSuggestions = (query, selectedTrip) => {
+    if (selectedTrip) {
+      const suggestions = [
+        `Weather forecast for ${selectedTrip.destination}`,
+        `Top attractions in ${selectedTrip.destination}`,
+        `Best restaurants in ${selectedTrip.destination}`,
+        `Transportation in ${selectedTrip.destination}`,
+        `Packing tips for ${selectedTrip.destination}`,
+        `Cultural tips for ${selectedTrip.destination}`
+      ];
+      return suggestions.slice(0, 3);
+    } else {
+      const suggestions = [
+        'Find nearby restaurants',
+        'Plan a day trip',
+        'Get travel tips',
+        'Check weather'
+      ];
+      return suggestions.slice(0, 3);
+    }
   };
 
   const handleQuickAction = (action) => {
@@ -442,12 +538,11 @@ export default function ChatScreen() {
         </View>
 
         {isUser && (
-          <Avatar
-            rounded
-            title={userProfile?.full_name?.charAt(0) || 'U'}
-            containerStyle={[styles.avatar, styles.userAvatar]}
-            size="small"
-          />
+          <View style={[styles.avatar, styles.userAvatar]}>
+            <Text style={styles.avatarEmoji}>
+              {selectedAvatar?.emoji || '🧳'}
+            </Text>
+          </View>
         )}
       </View>
     );
@@ -471,58 +566,81 @@ export default function ChatScreen() {
     );
   };
 
+  const refreshTrips = async () => {
+    setRefreshingTrips(true);
+    try {
+      await fetchUserData();
+    } catch (error) {
+      console.error('Error refreshing trips:', error);
+    } finally {
+      setRefreshingTrips(false);
+    }
+  };
+
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
+    <View style={styles.container}>
       {/* Header */}
       <LinearGradient
         colors={['#2089dc', '#4da6ff']}
         style={styles.header}
       >
-        <View style={styles.headerContent}>
-          <View>
-            <Text style={styles.headerTitle}>AI Travel Assistant</Text>
-            <Text style={styles.headerSubtitle}>
-              {isTyping ? 'Typing...' : 'Always here to help'}
-            </Text>
+         <Animated.View 
+           style={[
+             styles.headerContent,
+             {
+               opacity: fadeAnim,
+               transform: [{ translateY: slideAnim }]
+             }
+           ]}
+         >
+           <View style={styles.headerLeft}>
+             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+               <Icon name="arrow-back" type="material" color="#fff" size={24} />
+             </TouchableOpacity>
+             <View style={styles.headerTitleContainer}>
+               <Text style={styles.headerTitle}>AI Travel Assistant</Text>
+               <View style={styles.headerSubtitleContainer}>
+                 <View style={[styles.connectionIndicator, { backgroundColor: isConnected ? '#4CAF50' : '#f44336' }]} />
+                 <Text style={styles.headerSubtitle}>
+                   {isTyping ? 'Typing...' : isConnected ? 'Always here to help' : 'Connecting...'}
+                 </Text>
+               </View>
+             </View>
+           </View>
+          <View style={styles.headerActions}>
+            <TouchableOpacity onPress={clearChat} style={styles.headerButton}>
+              <Icon name="delete-outline" type="material" color="#fff" size={24} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => {
+              setShowTripSelector(true);
+              // Refresh trips when opening the selector
+              refreshTrips();
+            }} style={styles.headerButton}>
+              <Icon name="trip-origin" type="material" color="#fff" size={24} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowQuickActions(!showQuickActions)} style={styles.headerButton}>
+              <Icon name="apps" type="material" color="#fff" size={24} />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={clearChat}>
-            <Icon name="delete-outline" type="material" color="#fff" size={24} />
-          </TouchableOpacity>
-        </View>
+        </Animated.View>
       </LinearGradient>
 
-      {/* Trip Context Bar */}
-      {userTrips.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.contextBar}
-        >
-          <TouchableOpacity
-            style={[styles.contextChip, !selectedContext && styles.selectedContextChip]}
+      {/* Selected Trip Context Bar */}
+      {selectedContext && (
+        <View style={styles.selectedTripBar}>
+          <View style={styles.selectedTripInfo}>
+            <Icon name="place" type="material" color="#2089dc" size={16} />
+            <Text style={styles.selectedTripText}>
+              Assisting with: {selectedContext.title} ({selectedContext.destination})
+            </Text>
+          </View>
+          <TouchableOpacity 
             onPress={() => setSelectedContext(null)}
+            style={styles.clearTripButton}
           >
-            <Text style={styles.contextChipText}>General</Text>
+            <Icon name="close" type="material" color="#666" size={16} />
           </TouchableOpacity>
-          {userTrips.map((trip) => (
-            <TouchableOpacity
-              key={trip.id}
-              style={[
-                styles.contextChip,
-                selectedContext?.id === trip.id && styles.selectedContextChip
-              ]}
-              onPress={() => setSelectedContext(trip)}
-            >
-              <Text style={styles.contextChipText}>
-                {trip.destination.split(',')[0]}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        </View>
       )}
 
       {/* Messages */}
@@ -533,11 +651,18 @@ export default function ChatScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.messagesContainer}
         onContentSizeChange={() => scrollToBottom()}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        showsVerticalScrollIndicator={false}
       />
 
       {/* Quick Actions */}
       {showQuickActions && messages.length <= 1 && (
-        <ScrollView style={styles.quickActionsContainer}>
+        <ScrollView 
+          style={styles.quickActionsContainer}
+          contentContainerStyle={styles.quickActionsContent}
+          showsVerticalScrollIndicator={false}
+        >
           <Text style={styles.quickActionsTitle}>Quick Actions</Text>
           <View style={styles.quickActionsGrid}>
             {quickActions.map((action) => (
@@ -569,29 +694,170 @@ export default function ChatScreen() {
 
       {/* Input Bar */}
       <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.input}
-          value={inputText}
-          onChangeText={setInputText}
-          placeholder="Ask me anything about travel..."
-          placeholderTextColor="#999"
-          multiline
-          maxLength={500}
-        />
-        <TouchableOpacity
-          style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-          onPress={() => sendMessage()}
-          disabled={!inputText.trim() || isTyping}
-        >
-          <Icon
-            name="send"
-            type="material"
-            color={inputText.trim() ? '#fff' : '#ccc'}
-            size={24}
+        <Animated.View style={[
+          styles.inputWrapper,
+          {
+            borderColor: isInputFocused ? '#2089dc' : '#e5e5e5',
+            shadowOpacity: isInputFocused ? 0.1 : 0,
+            transform: [{
+              scale: inputFocusAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [1, 1.02]
+              })
+            }]
+          }
+        ]}>
+          <TextInput
+            style={styles.input}
+            value={inputText}
+            onChangeText={setInputText}
+            placeholder="Message AI Travel Assistant..."
+            placeholderTextColor="#8e8ea0"
+            multiline
+            maxLength={500}
+            returnKeyType="send"
+            blurOnSubmit={false}
+            onFocus={() => {
+              setIsInputFocused(true);
+              Animated.timing(inputFocusAnim, {
+                toValue: 1,
+                duration: 200,
+                useNativeDriver: true,
+              }).start();
+            }}
+            onBlur={() => {
+              setIsInputFocused(false);
+              Animated.timing(inputFocusAnim, {
+                toValue: 0,
+                duration: 200,
+                useNativeDriver: true,
+              }).start();
+            }}
+            onSubmitEditing={() => {
+              if (inputText.trim() && !isTyping) {
+                sendMessage();
+              }
+            }}
           />
-        </TouchableOpacity>
+          <Animated.View style={{
+            transform: [{
+              scale: sendButtonAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [1, 0.95]
+              })
+            }]
+          }}>
+            <TouchableOpacity
+              style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
+              onPress={() => {
+                Animated.sequence([
+                  Animated.timing(sendButtonAnim, {
+                    toValue: 1,
+                    duration: 100,
+                    useNativeDriver: true,
+                  }),
+                  Animated.timing(sendButtonAnim, {
+                    toValue: 0,
+                    duration: 100,
+                    useNativeDriver: true,
+                  })
+                ]).start();
+                sendMessage();
+              }}
+              disabled={!inputText.trim() || isTyping}
+            >
+              <Icon
+                name="send"
+                type="material"
+                color={inputText.trim() ? '#fff' : '#8e8ea0'}
+                size={20}
+              />
+            </TouchableOpacity>
+          </Animated.View>
+        </Animated.View>
       </View>
-    </KeyboardAvoidingView>
+
+      {/* Trip Selector Modal */}
+      <Modal
+        visible={showTripSelector}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        transparent={false}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Select Trip for Assistance</Text>
+            <View style={styles.modalHeaderActions}>
+              <TouchableOpacity onPress={refreshTrips} style={styles.refreshButton}>
+                <Icon name="refresh" type="material" color="#2089dc" size={20} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowTripSelector(false)}>
+                <Icon name="close" type="material" color="#333" size={24} />
+              </TouchableOpacity>
+            </View>
+          </View>
+          
+          <ScrollView style={styles.modalContent}>
+            <TouchableOpacity
+              style={[styles.tripOption, !selectedContext && styles.selectedTripOption]}
+              onPress={() => {
+                setSelectedContext(null);
+                setShowTripSelector(false);
+              }}
+            >
+              <View style={styles.tripOptionContent}>
+                <Icon name="public" type="material" color="#2089dc" size={24} />
+                <View style={styles.tripOptionText}>
+                  <Text style={styles.tripOptionTitle}>General Travel Assistance</Text>
+                  <Text style={styles.tripOptionSubtitle}>Get help with general travel questions</Text>
+                </View>
+                {!selectedContext && <Icon name="check" type="material" color="#4CAF50" size={20} />}
+              </View>
+            </TouchableOpacity>
+
+            {userTrips.map((trip) => (
+              <TouchableOpacity
+                key={trip.id}
+                style={[styles.tripOption, selectedContext?.id === trip.id && styles.selectedTripOption]}
+                onPress={() => {
+                  setSelectedContext(trip);
+                  setShowTripSelector(false);
+                }}
+              >
+                <View style={styles.tripOptionContent}>
+                  <Icon name="place" type="material" color="#2089dc" size={24} />
+                  <View style={styles.tripOptionText}>
+                    <Text style={styles.tripOptionTitle}>{trip.title}</Text>
+                    <Text style={styles.tripOptionSubtitle}>
+                      {trip.destination} • {new Date(trip.start_date).toLocaleDateString()}
+                    </Text>
+                  </View>
+                  {selectedContext?.id === trip.id && <Icon name="check" type="material" color="#4CAF50" size={20} />}
+                </View>
+              </TouchableOpacity>
+            ))}
+
+            {userTrips.length === 0 && (
+              <View style={styles.noTripsContainer}>
+                <Icon name="flight-takeoff" type="material" color="#ccc" size={48} />
+                <Text style={styles.noTripsText}>No active trips found</Text>
+                <Text style={styles.noTripsSubtext}>Create a trip or check if your trips are active</Text>
+                <TouchableOpacity 
+                  style={styles.retryButton}
+                  onPress={refreshTrips}
+                  disabled={refreshingTrips}
+                >
+                  <Icon name="refresh" type="material" color="#2089dc" size={16} />
+                  <Text style={styles.retryButtonText}>
+                    {refreshingTrips ? 'Refreshing...' : 'Refresh'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
@@ -610,16 +876,50 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  backButton: {
+    padding: 8,
+    marginRight: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  headerTitleContainer: {
+    flex: 1,
+  },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
   },
+  headerSubtitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  connectionIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
   headerSubtitle: {
     fontSize: 12,
     color: '#fff',
     opacity: 0.9,
-    marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerButton: {
+    padding: 8,
+    marginLeft: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   contextBar: {
     backgroundColor: '#fff',
@@ -660,10 +960,18 @@ const styles = StyleSheet.create({
   },
   avatar: {
     backgroundColor: '#2089dc',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   userAvatar: {
     backgroundColor: '#4CAF50',
     marginLeft: 8,
+  },
+  avatarEmoji: {
+    fontSize: 16,
   },
   messageBubble: {
     maxWidth: '75%',
@@ -710,11 +1018,14 @@ const styles = StyleSheet.create({
   },
   quickActionsContainer: {
     backgroundColor: '#fff',
-    paddingVertical: 15,
-    paddingHorizontal: 15,
-    maxHeight: 200,
+    maxHeight: 250,
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
+  },
+  quickActionsContent: {
+    paddingVertical: 15,
+    paddingHorizontal: 15,
+    paddingBottom: 30,
   },
   quickActionsTitle: {
     fontSize: 16,
@@ -734,7 +1045,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 12,
     marginRight: '5%',
-    marginBottom: 10,
+    marginBottom: 15,
+    minHeight: 50,
   },
   quickActionText: {
     fontSize: 13,
@@ -756,33 +1068,185 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   inputContainer: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e5e5',
+    paddingBottom: Platform.OS === 'ios' ? 20 : 16,
+    position: 'relative',
+    zIndex: 1000,
+  },
+  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    backgroundColor: '#fff',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    backgroundColor: '#f7f7f8',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    minHeight: 48,
+    maxHeight: 120,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
   input: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    maxHeight: 100,
     fontSize: 16,
+    lineHeight: 20,
+    color: '#000',
+    textAlignVertical: 'top',
+    paddingVertical: 8,
+    paddingHorizontal: 0,
+    maxHeight: 100,
   },
   sendButton: {
-    marginLeft: 10,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#2089dc',
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 8,
+    shadowColor: '#2089dc',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   sendButtonDisabled: {
-    backgroundColor: '#e0e0e0',
+    backgroundColor: '#e5e5e5',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  selectedTripBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f0f8ff',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  selectedTripInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  selectedTripText: {
+    fontSize: 14,
+    color: '#333',
+    marginLeft: 8,
+    flex: 1,
+  },
+  clearTripButton: {
+    padding: 4,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  modalHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  refreshButton: {
+    padding: 8,
+    marginRight: 10,
+    borderRadius: 8,
+    backgroundColor: '#f0f8ff',
+  },
+  modalContent: {
+    flex: 1,
+    padding: 20,
+  },
+  tripOption: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  selectedTripOption: {
+    backgroundColor: '#f0f8ff',
+    borderColor: '#2089dc',
+    borderWidth: 2,
+  },
+  tripOptionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  tripOptionText: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  tripOptionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  tripOptionSubtitle: {
+    fontSize: 14,
+    color: '#666',
+  },
+  noTripsContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  noTripsText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#999',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noTripsSubtext: {
+    fontSize: 14,
+    color: '#ccc',
+    textAlign: 'center',
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f8ff',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#2089dc',
+  },
+  retryButtonText: {
+    fontSize: 14,
+    color: '#2089dc',
+    marginLeft: 6,
+    fontWeight: '500',
   },
 });

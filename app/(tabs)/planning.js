@@ -1,30 +1,36 @@
-import React, { useState, useEffect } from 'react';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
   Alert,
+  Animated,
+  Dimensions,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   Share,
-  Modal
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
-import { Card, Button, Icon, Input, CheckBox } from 'react-native-elements';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { supabase } from '../../src/services/supabase/supabaseClient';
+import { Card, Icon } from 'react-native-elements';
 import groupTripService from '../../src/services/groupTripService';
-import { useRouter } from 'expo-router';
+import { supabase } from '../../src/services/supabase/supabaseClient';
 
 const TRIP_TYPES = [
-  { id: 'beach', label: 'Beach', icon: '🏖️', color: '#00BCD4' },
-  { id: 'camping', label: 'Camping', icon: '⛺', color: '#4CAF50' },
-  { id: 'city', label: 'City Trip', icon: '🏙️', color: '#9C27B0' },
-  { id: 'road-trip', label: 'Road Trip', icon: '🚗', color: '#FF9800' },
-  { id: 'custom', label: 'Custom', icon: '✨', color: '#607D8B' }
+  { id: 'beach', label: 'Beach', icon: '🏖️', color: '#00BCD4', gradient: ['#00BCD4', '#26C6DA'] },
+  { id: 'camping', label: 'Camping', icon: '⛺', color: '#4CAF50', gradient: ['#4CAF50', '#66BB6A'] },
+  { id: 'city', label: 'City Trip', icon: '🏙️', color: '#9C27B0', gradient: ['#9C27B0', '#BA68C8'] },
+  { id: 'road-trip', label: 'Road Trip', icon: '🚗', color: '#FF9800', gradient: ['#FF9800', '#FFB74D'] },
+  { id: 'custom', label: 'Custom', icon: '✨', color: '#607D8B', gradient: ['#607D8B', '#78909C'] }
 ];
+
+const { width } = Dimensions.get('window');
 
 export default function PlanningScreen() {
   const router = useRouter();
@@ -32,6 +38,16 @@ export default function PlanningScreen() {
   const [showStartDate, setShowStartDate] = useState(false);
   const [showEndDate, setShowEndDate] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [focusedInput, setFocusedInput] = useState(null);
+
+  // Animation references
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
+  const scaleAnim = useRef(new Animated.Value(0.95)).current;
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const tripTypeAnimations = useRef(TRIP_TYPES.map(() => new Animated.Value(0))).current;
+  const advancedHeightAnim = useRef(new Animated.Value(0)).current;
+  const buttonScaleAnim = useRef(new Animated.Value(1)).current;
 
   const [tripData, setTripData] = useState({
     title: '',
@@ -46,6 +62,62 @@ export default function PlanningScreen() {
     requireApproval: false,
     autoExpireDays: 30
   });
+
+  // Initialize animations
+  useEffect(() => {
+    const startAnimations = () => {
+      // Header animation
+      Animated.timing(headerAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }).start();
+
+      // Main content animations
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          tension: 50,
+          friction: 7,
+          useNativeDriver: true,
+        }),
+      ]).start();
+
+      // Staggered trip type animations
+      tripTypeAnimations.forEach((anim, index) => {
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: 400,
+          delay: index * 100,
+          useNativeDriver: true,
+        }).start();
+      });
+    };
+
+    startAnimations();
+  }, []);
+
+  // Handle advanced settings toggle with animation
+  const toggleAdvanced = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setShowAdvanced(!showAdvanced);
+    
+    Animated.timing(advancedHeightAnim, {
+      toValue: showAdvanced ? 0 : 1,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+  };
 
   const validateForm = () => {
     if (!tripData.title.trim()) {
@@ -66,6 +138,21 @@ export default function PlanningScreen() {
   const createTrip = async () => {
     if (!validateForm()) return;
 
+    // Button press animation
+    Animated.sequence([
+      Animated.timing(buttonScaleAnim, {
+        toValue: 0.95,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(buttonScaleAnim, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -99,6 +186,9 @@ export default function PlanningScreen() {
           budget_limit: parseFloat(tripData.budget) || null
         }]);
 
+      // Success haptic feedback
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      
       Alert.alert(
         'Success!',
         `Trip created! Your invite code is: ${inviteCode}`,
@@ -147,295 +237,698 @@ export default function PlanningScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Create New Trip</Text>
-          <Text style={styles.headerSubtitle}>Plan your next adventure</Text>
-        </View>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#2089dc" />
+      
+
+      <KeyboardAvoidingView
+        style={styles.contentContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView 
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
 
         {/* Basic Information */}
-        <Card containerStyle={styles.card}>
-          <Text style={styles.sectionTitle}>Trip Details</Text>
-
-          <Input
-            placeholder="Trip Name"
-            value={tripData.title}
-            onChangeText={(text) => setTripData({ ...tripData, title: text })}
-            leftIcon={<Icon name="label" type="material" color="#999" size={20} />}
-            containerStyle={styles.inputContainer}
-          />
-
-          <Input
-            placeholder="Destination"
-            value={tripData.destination}
-            onChangeText={(text) => setTripData({ ...tripData, destination: text })}
-            leftIcon={<Icon name="place" type="material" color="#999" size={20} />}
-            containerStyle={styles.inputContainer}
-          />
-
-          <Input
-            placeholder="Description (optional)"
-            value={tripData.description}
-            onChangeText={(text) => setTripData({ ...tripData, description: text })}
-            multiline
-            numberOfLines={3}
-            leftIcon={<Icon name="description" type="material" color="#999" size={20} />}
-            containerStyle={styles.inputContainer}
-          />
-        </Card>
-
-        {/* Trip Type */}
-        <Card containerStyle={styles.card}>
-          <Text style={styles.sectionTitle}>Trip Type</Text>
-          <View style={styles.tripTypeGrid}>
-            {TRIP_TYPES.map((type) => (
-              <TouchableOpacity
-                key={type.id}
-                style={[
-                  styles.tripTypeCard,
-                  tripData.tripType === type.id && {
-                    borderColor: type.color,
-                    backgroundColor: `${type.color}10`
-                  }
-                ]}
-                onPress={() => setTripData({ ...tripData, tripType: type.id })}
-              >
-                <Text style={styles.tripTypeIcon}>{type.icon}</Text>
-                <Text style={[
-                  styles.tripTypeLabel,
-                  tripData.tripType === type.id && { color: type.color, fontWeight: 'bold' }
-                ]}>
-                  {type.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </Card>
-
-        {/* Dates */}
-        <Card containerStyle={styles.card}>
-          <Text style={styles.sectionTitle}>Trip Dates</Text>
-
-          <TouchableOpacity
-            style={styles.dateButton}
-            onPress={() => setShowStartDate(true)}
-          >
-            <Icon name="calendar-today" type="material" color="#999" size={20} />
-            <View style={styles.dateContent}>
-              <Text style={styles.dateLabel}>Start Date</Text>
-              <Text style={styles.dateValue}>{tripData.startDate.toDateString()}</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.dateButton}
-            onPress={() => setShowEndDate(true)}
-          >
-            <Icon name="calendar-today" type="material" color="#999" size={20} />
-            <View style={styles.dateContent}>
-              <Text style={styles.dateLabel}>End Date</Text>
-              <Text style={styles.dateValue}>{tripData.endDate.toDateString()}</Text>
-            </View>
-          </TouchableOpacity>
-
-          <View style={styles.durationInfo}>
-            <Icon name="schedule" type="material" color="#00BFA5" size={16} />
-            <Text style={styles.durationText}>
-              Duration: {Math.ceil((tripData.endDate - tripData.startDate) / (1000 * 60 * 60 * 24))} days
-            </Text>
-          </View>
-
-          {showStartDate && (
-            <DateTimePicker
-              value={tripData.startDate}
-              mode="date"
-              display="default"
-              onChange={(event, selectedDate) => {
-                setShowStartDate(false);
-                if (selectedDate) {
-                  setTripData({ ...tripData, startDate: selectedDate });
-                }
-              }}
-            />
-          )}
-
-          {showEndDate && (
-            <DateTimePicker
-              value={tripData.endDate}
-              mode="date"
-              display="default"
-              onChange={(event, selectedDate) => {
-                setShowEndDate(false);
-                if (selectedDate) {
-                  setTripData({ ...tripData, endDate: selectedDate });
-                }
-              }}
-            />
-          )}
-        </Card>
-
-        {/* Advanced Settings */}
-        <Card containerStyle={styles.card}>
-          <TouchableOpacity
-            style={styles.advancedHeader}
-            onPress={() => setShowAdvanced(!showAdvanced)}
-          >
-            <Text style={styles.sectionTitle}>Advanced Settings</Text>
-            <Icon
-              name={showAdvanced ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
-              type="material"
-              color="#999"
-            />
-          </TouchableOpacity>
-
-          {showAdvanced && (
-            <View style={styles.advancedContent}>
-              <Input
-                placeholder="Budget (optional)"
-                value={tripData.budget}
-                onChangeText={(text) => setTripData({ ...tripData, budget: text })}
-                keyboardType="numeric"
-                leftIcon={<Icon name="attach-money" type="material" color="#999" size={20} />}
-                containerStyle={styles.inputContainer}
-              />
-
-              <Input
-                placeholder="Max members (optional)"
-                value={tripData.maxMembers}
-                onChangeText={(text) => setTripData({ ...tripData, maxMembers: text })}
-                keyboardType="numeric"
-                leftIcon={<Icon name="group" type="material" color="#999" size={20} />}
-                containerStyle={styles.inputContainer}
-              />
-
-              <CheckBox
-                title="Private trip (invite only)"
-                checked={tripData.isPrivate}
-                onPress={() => setTripData({ ...tripData, isPrivate: !tripData.isPrivate })}
-                containerStyle={styles.checkbox}
-              />
-
-              <CheckBox
-                title="Require approval for new members"
-                checked={tripData.requireApproval}
-                onPress={() => setTripData({ ...tripData, requireApproval: !tripData.requireApproval })}
-                containerStyle={styles.checkbox}
-              />
-
-              <View style={styles.expireContainer}>
-                <Text style={styles.expireLabel}>Invite expires after:</Text>
-                <View style={styles.expireOptions}>
-                  {[7, 30, 90].map((days) => (
-                    <TouchableOpacity
-                      key={days}
-                      style={[
-                        styles.expireOption,
-                        tripData.autoExpireDays === days && styles.expireOptionActive
-                      ]}
-                      onPress={() => setTripData({ ...tripData, autoExpireDays: days })}
-                    >
-                      <Text style={[
-                        styles.expireOptionText,
-                        tripData.autoExpireDays === days && styles.expireOptionTextActive
-                      ]}>
-                        {days} days
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+        <Animated.View
+          style={[
+            styles.animatedCard,
+            {
+              opacity: fadeAnim,
+              transform: [
+                { translateY: slideAnim },
+                { scale: scaleAnim }
+              ]
+            }
+          ]}
+        >
+          <Card containerStyle={styles.card}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Trip Details</Text>
+              <View style={styles.sectionIcon}>
+                <Text style={styles.sectionEmoji}>📝</Text>
               </View>
             </View>
-          )}
-        </Card>
+
+            <View style={styles.inputGroup}>
+              <View style={[
+                styles.inputWrapper,
+                focusedInput === 'title' && styles.inputWrapperFocused
+              ]}>
+                <Icon name="label" type="material" color={focusedInput === 'title' ? '#2089dc' : '#999'} size={20} />
+                <TextInput
+                  style={styles.customInput}
+                  placeholder="Trip Name"
+                  placeholderTextColor="#999"
+                  value={tripData.title}
+                  onChangeText={(text) => setTripData({ ...tripData, title: text })}
+                  onFocus={() => setFocusedInput('title')}
+                  onBlur={() => setFocusedInput(null)}
+                />
+              </View>
+
+              <View style={[
+                styles.inputWrapper,
+                focusedInput === 'destination' && styles.inputWrapperFocused
+              ]}>
+                <Icon name="place" type="material" color={focusedInput === 'destination' ? '#2089dc' : '#999'} size={20} />
+                <TextInput
+                  style={styles.customInput}
+                  placeholder="Destination"
+                  placeholderTextColor="#999"
+                  value={tripData.destination}
+                  onChangeText={(text) => setTripData({ ...tripData, destination: text })}
+                  onFocus={() => setFocusedInput('destination')}
+                  onBlur={() => setFocusedInput(null)}
+                />
+              </View>
+
+              <View style={[
+                styles.inputWrapper,
+                styles.textAreaWrapper,
+                focusedInput === 'description' && styles.inputWrapperFocused
+              ]}>
+                <View style={styles.textAreaIconContainer}>
+                  <Icon name="description" type="material" color={focusedInput === 'description' ? '#2089dc' : '#999'} size={20} />
+                </View>
+                <TextInput
+                  style={styles.textArea}
+                  placeholder="Description (optional)"
+                  placeholderTextColor="#999"
+                  value={tripData.description}
+                  onChangeText={(text) => setTripData({ ...tripData, description: text })}
+                  multiline
+                  numberOfLines={3}
+                  onFocus={() => setFocusedInput('description')}
+                  onBlur={() => setFocusedInput(null)}
+                />
+              </View>
+            </View>
+          </Card>
+        </Animated.View>
+
+        {/* Trip Type */}
+        <Animated.View
+          style={[
+            styles.animatedCard,
+            {
+              opacity: fadeAnim,
+              transform: [
+                { translateY: slideAnim.interpolate({
+                  inputRange: [0, 50],
+                  outputRange: [0, 20]
+                })},
+                { scale: scaleAnim }
+              ]
+            }
+          ]}
+        >
+          <Card containerStyle={styles.card}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Trip Type</Text>
+              <View style={styles.sectionIcon}>
+                <Text style={styles.sectionEmoji}>🎯</Text>
+              </View>
+            </View>
+            <View style={styles.tripTypeGrid}>
+              {TRIP_TYPES.map((type, index) => (
+                <Animated.View
+                  key={type.id}
+                  style={[
+                    {
+                      opacity: tripTypeAnimations[index],
+                      transform: [{
+                        scale: tripTypeAnimations[index].interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.8, 1]
+                        })
+                      }]
+                    }
+                  ]}
+                >
+                  <TouchableOpacity
+                    style={[
+                      styles.tripTypeCard,
+                      tripData.tripType === type.id && styles.tripTypeCardSelected
+                    ]}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setTripData({ ...tripData, tripType: type.id });
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    {tripData.tripType === type.id ? (
+                      <LinearGradient
+                        colors={type.gradient}
+                        style={styles.tripTypeGradient}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                      >
+                        <Text style={styles.tripTypeIcon}>{type.icon}</Text>
+                        <Text style={[styles.tripTypeLabel, styles.tripTypeLabelSelected]}>
+                          {type.label}
+                        </Text>
+                      </LinearGradient>
+                    ) : (
+                      <View style={styles.tripTypeContent}>
+                        <Text style={styles.tripTypeIcon}>{type.icon}</Text>
+                        <Text style={styles.tripTypeLabel}>
+                          {type.label}
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                </Animated.View>
+              ))}
+            </View>
+          </Card>
+        </Animated.View>
+
+        {/* Dates */}
+        <Animated.View
+          style={[
+            styles.animatedCard,
+            {
+              opacity: fadeAnim,
+              transform: [
+                { translateY: slideAnim.interpolate({
+                  inputRange: [0, 50],
+                  outputRange: [0, 30]
+                })},
+                { scale: scaleAnim }
+              ]
+            }
+          ]}
+        >
+          <Card containerStyle={styles.card}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Trip Dates</Text>
+              <View style={styles.sectionIcon}>
+                <Text style={styles.sectionEmoji}>📅</Text>
+              </View>
+            </View>
+
+            <View style={styles.dateContainer}>
+              <TouchableOpacity
+                style={styles.dateButton}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setShowStartDate(true);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.dateIconContainer}>
+                  <Icon name="calendar-today" type="material" color="#2089dc" size={20} />
+                </View>
+                <View style={styles.dateContent}>
+                  <Text style={styles.dateLabel}>Start Date</Text>
+                  <Text style={styles.dateValue}>{tripData.startDate.toDateString()}</Text>
+                </View>
+                <Icon name="chevron-right" type="material" color="#ccc" size={20} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.dateButton}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setShowEndDate(true);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.dateIconContainer}>
+                  <Icon name="calendar-today" type="material" color="#2089dc" size={20} />
+                </View>
+                <View style={styles.dateContent}>
+                  <Text style={styles.dateLabel}>End Date</Text>
+                  <Text style={styles.dateValue}>{tripData.endDate.toDateString()}</Text>
+                </View>
+                <Icon name="chevron-right" type="material" color="#ccc" size={20} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.durationInfo}>
+              <LinearGradient
+                colors={['#e8f5e9', '#f1f8e9']}
+                style={styles.durationGradient}
+              >
+                <Icon name="schedule" type="material" color="#00BFA5" size={18} />
+                <Text style={styles.durationText}>
+                  Duration: {Math.ceil((tripData.endDate - tripData.startDate) / (1000 * 60 * 60 * 24))} days
+                </Text>
+              </LinearGradient>
+            </View>
+
+            {showStartDate && (
+              <DateTimePicker
+                value={tripData.startDate}
+                mode="date"
+                display="default"
+                onChange={(event, selectedDate) => {
+                  setShowStartDate(false);
+                  if (selectedDate) {
+                    setTripData({ ...tripData, startDate: selectedDate });
+                  }
+                }}
+              />
+            )}
+
+            {showEndDate && (
+              <DateTimePicker
+                value={tripData.endDate}
+                mode="date"
+                display="default"
+                onChange={(event, selectedDate) => {
+                  setShowEndDate(false);
+                  if (selectedDate) {
+                    setTripData({ ...tripData, endDate: selectedDate });
+                  }
+                }}
+              />
+            )}
+          </Card>
+        </Animated.View>
+
+        {/* Advanced Settings */}
+        <Animated.View
+          style={[
+            styles.animatedCard,
+            {
+              opacity: fadeAnim,
+              transform: [
+                { translateY: slideAnim.interpolate({
+                  inputRange: [0, 50],
+                  outputRange: [0, 40]
+                })},
+                { scale: scaleAnim }
+              ]
+            }
+          ]}
+        >
+          <Card containerStyle={styles.card}>
+            <TouchableOpacity
+              style={styles.advancedHeader}
+              onPress={toggleAdvanced}
+              activeOpacity={0.7}
+            >
+              <View style={styles.advancedHeaderContent}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Advanced Settings</Text>
+                  <View style={styles.sectionIcon}>
+                    <Text style={styles.sectionEmoji}>⚙️</Text>
+                  </View>
+                </View>
+                <Animated.View
+                  style={{
+                    transform: [{
+                      rotate: advancedHeightAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['0deg', '180deg']
+                      })
+                    }]
+                  }}
+                >
+                  <Icon
+                    name="keyboard-arrow-down"
+                    type="material"
+                    color="#2089dc"
+                    size={24}
+                  />
+                </Animated.View>
+              </View>
+            </TouchableOpacity>
+
+            <Animated.View
+              style={[
+                styles.advancedContent,
+                {
+                  height: advancedHeightAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, 400]
+                  }),
+                  opacity: advancedHeightAnim
+                }
+              ]}
+            >
+              <View style={styles.advancedInputs}>
+                <View style={[
+                  styles.inputWrapper,
+                  focusedInput === 'budget' && styles.inputWrapperFocused
+                ]}>
+                  <Icon name="attach-money" type="material" color={focusedInput === 'budget' ? '#2089dc' : '#999'} size={20} />
+                  <TextInput
+                    style={styles.customInput}
+                    placeholder="Budget (optional)"
+                    placeholderTextColor="#999"
+                    value={tripData.budget}
+                    onChangeText={(text) => setTripData({ ...tripData, budget: text })}
+                    keyboardType="numeric"
+                    onFocus={() => setFocusedInput('budget')}
+                    onBlur={() => setFocusedInput(null)}
+                  />
+                </View>
+
+                <View style={[
+                  styles.inputWrapper,
+                  focusedInput === 'maxMembers' && styles.inputWrapperFocused
+                ]}>
+                  <Icon name="group" type="material" color={focusedInput === 'maxMembers' ? '#2089dc' : '#999'} size={20} />
+                  <TextInput
+                    style={styles.customInput}
+                    placeholder="Max members (optional)"
+                    placeholderTextColor="#999"
+                    value={tripData.maxMembers}
+                    onChangeText={(text) => setTripData({ ...tripData, maxMembers: text })}
+                    keyboardType="numeric"
+                    onFocus={() => setFocusedInput('maxMembers')}
+                    onBlur={() => setFocusedInput(null)}
+                  />
+                </View>
+
+                <View style={styles.checkboxContainer}>
+                  <TouchableOpacity
+                    style={styles.checkboxRow}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setTripData({ ...tripData, isPrivate: !tripData.isPrivate });
+                    }}
+                  >
+                    <View style={[
+                      styles.checkbox,
+                      tripData.isPrivate && styles.checkboxChecked
+                    ]}>
+                      {tripData.isPrivate && <Icon name="check" type="material" color="#fff" size={16} />}
+                    </View>
+                    <Text style={styles.checkboxLabel}>Private trip (invite only)</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.checkboxRow}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setTripData({ ...tripData, requireApproval: !tripData.requireApproval });
+                    }}
+                  >
+                    <View style={[
+                      styles.checkbox,
+                      tripData.requireApproval && styles.checkboxChecked
+                    ]}>
+                      {tripData.requireApproval && <Icon name="check" type="material" color="#fff" size={16} />}
+                    </View>
+                    <Text style={styles.checkboxLabel}>Require approval for new members</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.expireContainer}>
+                  <Text style={styles.expireLabel}>Invite expires after:</Text>
+                  <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.expireOptions}
+                  >
+                    {[7, 30, 90].map((days) => (
+                      <TouchableOpacity
+                        key={days}
+                        style={[
+                          styles.expireOption,
+                          tripData.autoExpireDays === days && styles.expireOptionActive
+                        ]}
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          setTripData({ ...tripData, autoExpireDays: days });
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[
+                          styles.expireOptionText,
+                          tripData.autoExpireDays === days && styles.expireOptionTextActive
+                        ]}>
+                          {days} days
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              </View>
+            </Animated.View>
+          </Card>
+        </Animated.View>
 
         {/* Create Button */}
-        <Button
-          title="Create Trip"
-          loading={loading}
-          buttonStyle={styles.createButton}
-          titleStyle={styles.createButtonText}
-          icon={<Icon name="check" type="material" color="#fff" size={20} />}
-          onPress={createTrip}
-        />
-      </ScrollView>
-    </KeyboardAvoidingView>
+        <Animated.View
+          style={[
+            styles.createButtonContainer,
+            {
+              opacity: fadeAnim,
+              transform: [
+                { translateY: slideAnim.interpolate({
+                  inputRange: [0, 50],
+                  outputRange: [0, 50]
+                })},
+                { scale: buttonScaleAnim }
+              ]
+            }
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.createButton}
+            onPress={createTrip}
+            disabled={loading}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={loading ? ['#ccc', '#999'] : ['#00BFA5', '#00E676']}
+              style={styles.createButtonGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              {loading ? (
+                <View style={styles.loadingContainer}>
+                  <Animated.View style={styles.loadingSpinner}>
+                    <Icon name="refresh" type="material" color="#fff" size={20} />
+                  </Animated.View>
+                  <Text style={styles.createButtonText}>Creating Trip...</Text>
+                </View>
+              ) : (
+                <View style={styles.createButtonContent}>
+                  <Icon name="check" type="material" color="#fff" size={24} />
+                  <Text style={styles.createButtonText}>Create Trip</Text>
+                </View>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8f9fa',
   },
   header: {
-    backgroundColor: '#fff',
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
+  headerGradient: {
     paddingHorizontal: 20,
-    paddingVertical: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    paddingVertical: 16,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerTextContainer: {
+    flex: 1,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#fff',
+    marginBottom: 5,
   },
   headerSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 5,
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.9)',
+  },
+  headerIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerIcon: {
+    fontSize: 28,
+  },
+  contentContainer: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 30,
+  },
+  animatedCard: {
+    marginHorizontal: 15,
+    marginTop: 8,
   },
   card: {
-    borderRadius: 12,
-    marginHorizontal: 15,
-    marginTop: 15,
-    elevation: 2,
+    borderRadius: 20,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.05)',
+    padding: 20,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 15,
   },
-  inputContainer: {
-    marginBottom: 10,
+  sectionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sectionEmoji: {
+    fontSize: 20,
+  },
+  inputGroup: {
+    gap: 15,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  inputWrapperFocused: {
+    borderColor: '#2089dc',
+    shadowColor: '#2089dc',
+    shadowOpacity: 0.2,
+    elevation: 4,
+  },
+  customInput: {
+    flex: 1,
+    marginLeft: 12,
+    fontSize: 16,
+    color: '#333',
+  },
+  textAreaWrapper: {
+    alignItems: 'flex-start',
+    paddingVertical: 15,
+  },
+  textAreaIconContainer: {
+    alignSelf: 'flex-start',
+    marginTop: 11,
+  },
+  textArea: {
+    flex: 1,
+    minHeight: 60,
+    textAlignVertical: 'top',
+    marginLeft: 12,
+    fontSize: 16,
+    color: '#333',
   },
   tripTypeGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+    gap: 10,
   },
   tripTypeCard: {
-    width: '30%',
-    padding: 15,
-    borderWidth: 2,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
+    width: (width - 80) / 3,
+    height: 100,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  tripTypeCardSelected: {
+    shadowOpacity: 0.2,
+    elevation: 8,
+  },
+  tripTypeGradient: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 10,
+    padding: 10,
+  },
+  tripTypeContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#fff',
+    padding: 10,
   },
   tripTypeIcon: {
-    fontSize: 28,
-    marginBottom: 5,
+    fontSize: 32,
+    marginBottom: 8,
   },
   tripTypeLabel: {
     fontSize: 12,
     color: '#666',
     textAlign: 'center',
+    fontWeight: '500',
+  },
+  tripTypeLabelSelected: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  dateContainer: {
+    gap: 12,
+    marginBottom: 15,
   },
   dateButton: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 15,
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: '#e0e0e0',
-    borderRadius: 8,
-    marginBottom: 10,
+    borderRadius: 12,
     backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  dateIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f0f8ff',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   dateContent: {
     marginLeft: 15,
@@ -444,82 +937,144 @@ const styles = StyleSheet.create({
   dateLabel: {
     fontSize: 12,
     color: '#999',
+    marginBottom: 2,
   },
   dateValue: {
     fontSize: 16,
     color: '#333',
-    marginTop: 2,
+    fontWeight: '500',
   },
   durationInfo: {
+    marginTop: 10,
+  },
+  durationGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 10,
-    backgroundColor: '#e8f5e9',
-    borderRadius: 8,
+    padding: 15,
+    borderRadius: 12,
   },
   durationText: {
-    marginLeft: 8,
-    fontSize: 14,
+    marginLeft: 10,
+    fontSize: 16,
     color: '#00BFA5',
     fontWeight: 'bold',
   },
   advancedHeader: {
+    marginBottom: 10,
+  },
+  advancedHeaderContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   advancedContent: {
-    marginTop: 15,
+    overflow: 'hidden',
+  },
+  advancedInputs: {
+    gap: 15,
+  },
+  checkboxContainer: {
+    gap: 15,
+    marginVertical: 10,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   checkbox: {
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-    marginLeft: 0,
-    marginBottom: 10,
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  checkboxChecked: {
+    backgroundColor: '#2089dc',
+    borderColor: '#2089dc',
+  },
+  checkboxLabel: {
+    fontSize: 16,
+    color: '#333',
+    flex: 1,
   },
   expireContainer: {
-    marginTop: 10,
+    marginTop: 15,
   },
   expireLabel: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#666',
-    marginBottom: 10,
+    marginBottom: 15,
+    fontWeight: '500',
   },
   expireOptions: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    paddingHorizontal: 5,
+    gap: 10,
   },
   expireOption: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
+    minWidth: 80,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 25,
+    borderWidth: 2,
     borderColor: '#e0e0e0',
     backgroundColor: '#fff',
+    alignItems: 'center',
+    marginRight: 10,
   },
   expireOptionActive: {
-    backgroundColor: '#00BFA5',
-    borderColor: '#00BFA5',
+    backgroundColor: '#2089dc',
+    borderColor: '#2089dc',
   },
   expireOptionText: {
     fontSize: 14,
     color: '#666',
+    fontWeight: '500',
   },
   expireOptionTextActive: {
     color: '#fff',
     fontWeight: 'bold',
   },
-  createButton: {
-    backgroundColor: '#00BFA5',
-    borderRadius: 25,
-    paddingVertical: 15,
+  createButtonContainer: {
     marginHorizontal: 15,
-    marginTop: 20,
+    marginTop: 25,
     marginBottom: 30,
+  },
+  createButton: {
+    borderRadius: 25,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  createButtonGradient: {
+    paddingVertical: 18,
+    paddingHorizontal: 30,
+  },
+  createButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   createButtonText: {
     fontSize: 18,
     fontWeight: 'bold',
+    color: '#fff',
+    marginLeft: 10,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingSpinner: {
+    transform: [{ rotate: '0deg' }],
   },
 });

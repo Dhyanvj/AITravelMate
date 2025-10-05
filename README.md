@@ -1,6 +1,38 @@
-# Welcome to your Expo app 👋
+# AI Travel Mate 🧳✈️
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+An intelligent travel companion app built with React Native and Expo, featuring AI-powered trip planning and travel assistance.
+
+## Features
+
+- 🤖 **AI Travel Assistant**: Get personalized travel advice and recommendations
+- 📱 **Modern UI**: Beautiful, animated interface with smooth transitions
+- 🎯 **Smart Recommendations**: Get suggestions based on your preferences and location
+
+## Setup
+
+### 1. Install Dependencies
+
+```bash
+npm install
+```
+
+### 2. Configure OpenAI API (Optional)
+
+For full AI functionality, you'll need an OpenAI API key:
+
+1. Get your API key from [OpenAI Platform](https://platform.openai.com/api-keys)
+2. Create a `.env` file in the root directory:
+   ```
+   EXPO_PUBLIC_OPENAI_API_KEY=your-api-key-here
+   ```
+
+**Note**: The app works without an API key using fallback responses, but you'll get better AI-powered recommendations with a valid key.
+
+### 3. Start the App
+
+```bash
+npx expo start
+```
 
 ## Get started
 
