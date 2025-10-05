@@ -1,11 +1,9 @@
 import axios from 'axios';
 
 // You'll need to add your OpenAI API key here
-<<<<<<< HEAD
+
 const OPENAI_API_KEY = 'YOUR_OPENAI_KEY'; // Store this securely in environment variables
-=======
-const OPENAI_API_KEY = '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'; // Store this securely in environment variables
->>>>>>> e8d8f0c (Add initial database schemas and features for chat, packing, and expense management. Implemented real-time messaging with WebSocket support, enhanced chat attachments, and packing list functionalities. Updated app layout and added settings tab. Removed unused features and optimized existing code for better performance.)
+
 
 class AIService {
   constructor() {
