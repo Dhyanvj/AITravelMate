@@ -261,6 +261,55 @@ export default function ExpenseTab({ tripId, userRole }) {
     );
   };
 
+  const handleUndoPayment = async (settlementId, userName) => {
+    Alert.alert(
+      'Undo Payment',
+      `Undo payment to ${userName}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Undo',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await expenseService.undoPayment(settlementId);
+              Alert.alert('Success', 'Payment undone');
+              // Refresh the debt breakdown
+              await fetchDetailedDebtBreakdown();
+            } catch (error) {
+              console.error('Error undoing payment:', error);
+              Alert.alert('Error', 'Failed to undo payment');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Current user paid another member (You Owe To Others -> I Paid)
+  const handleIPaid = async (toUserId, amount) => {
+    Alert.alert(
+      'Confirm Payment',
+      `Confirm you paid $${amount.toFixed(2)} to this member?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'I Paid',
+          onPress: async () => {
+            try {
+              await expenseService.markMemberAsPaid(tripId, currentUser.id, toUserId, amount);
+              Alert.alert('Success', 'Your payment was recorded');
+              await fetchDetailedDebtBreakdown();
+            } catch (error) {
+              console.error('Error recording payment:', error);
+              Alert.alert('Error', 'Failed to record payment');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const canEditExpense = (expense) => {
     if (!currentUser) return false;
     // Allow if user is the trip owner or the expense creator
@@ -494,6 +543,16 @@ export default function ExpenseTab({ tripId, userRole }) {
       membersIOwe
     } = detailedDebtBreakdown;
 
+    // Compute section header totals from per-member nets so headers match breakdown
+    const sectionTotalYouOwe = (membersIOwe || []).reduce((sum, member) => {
+      const v = parseFloat(member?.netOwesMe || 0);
+      return sum + Math.abs(v < 0 ? v : 0);
+    }, 0);
+    const sectionTotalOwedToYou = (membersWhoOweMe || []).reduce((sum, member) => {
+      const v = parseFloat(member?.netOwesMe || 0);
+      return sum + (v > 0 ? v : 0);
+    }, 0);
+
     return (
       
       <View>
@@ -511,9 +570,9 @@ export default function ExpenseTab({ tripId, userRole }) {
               <Text style={[
                 styles.debtSectionAmount, 
                 { color: '#FF3B30' },
-                totalYouOwe >= 1000 && styles.largeAmountText
+                sectionTotalYouOwe >= 1000 && styles.largeAmountText
               ]}>
-                ${totalYouOwe.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ${sectionTotalYouOwe.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </Text>
               <Icon 
                 name={expandedDebtSections.youOwe ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} 
@@ -544,6 +603,29 @@ export default function ExpenseTab({ tripId, userRole }) {
                       <Text style={styles.memberDebtDetails}>
                         You owe {member.userName} after netting all expenses
                       </Text>
+                      {member.paymentStatus === 'paid' ? (
+                        <View style={styles.paidStatusContainer}>
+                          <View style={styles.paidStatus}>
+                            <Icon name="check-circle" type="material" size={16} color="#34C759" />
+                            <Text style={styles.paidStatusText}>Paid</Text>
+                          </View>
+                          <TouchableOpacity 
+                            style={styles.undoButton}
+                            onPress={() => handleUndoPayment(member.settlementId, member.userName)}
+                          >
+                            <Icon name="undo" type="material" size={16} color="#FF3B30" />
+                            <Text style={styles.undoText}>Undo</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <TouchableOpacity 
+                          style={styles.markPaidButton}
+                          onPress={() => handleIPaid(member.userId, Math.abs(member.netOwesMe))}
+                        >
+                          <Icon name="check" type="material" size={16} color="white" />
+                          <Text style={styles.markPaidText}>I Paid</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   ))}
                 </View>
@@ -568,9 +650,9 @@ export default function ExpenseTab({ tripId, userRole }) {
               <Text style={[
                 styles.debtSectionAmount, 
                 { color: '#34C759' },
-                totalOwedToYou >= 1000 && styles.largeAmountText
+                sectionTotalOwedToYou >= 1000 && styles.largeAmountText
               ]}>
-                ${totalOwedToYou.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ${sectionTotalOwedToYou.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </Text>
               <Icon 
                 name={expandedDebtSections.othersOwe ? 'keyboard-arrow-up' : 'keyboard-arrow-down'} 
@@ -601,13 +683,29 @@ export default function ExpenseTab({ tripId, userRole }) {
                       <Text style={styles.memberDebtDetails}>
                         {member.userName} owes you after netting all expenses
                       </Text>
-                      <TouchableOpacity 
-                        style={styles.markPaidButton}
-                        onPress={() => handleMarkAsPaid(member.userId, member.netOwesMe)}
-                      >
-                        <Icon name="check" type="material" size={16} color="white" />
-                        <Text style={styles.markPaidText}>Mark as Paid</Text>
-                      </TouchableOpacity>
+                      {member.paymentStatus === 'received' ? (
+                        <View style={styles.paidStatusContainer}>
+                          <View style={styles.paidStatus}>
+                            <Icon name="check-circle" type="material" size={16} color="#34C759" />
+                            <Text style={styles.paidStatusText}>Paid</Text>
+                          </View>
+                          <TouchableOpacity 
+                            style={styles.undoButton}
+                            onPress={() => handleUndoPayment(member.settlementId, member.userName)}
+                          >
+                            <Icon name="undo" type="material" size={16} color="#FF3B30" />
+                            <Text style={styles.undoText}>Undo</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <TouchableOpacity 
+                          style={styles.markPaidButton}
+                          onPress={() => handleMarkAsPaid(member.userId, member.netOwesMe)}
+                        >
+                          <Icon name="check" type="material" size={16} color="white" />
+                          <Text style={styles.markPaidText}>Mark as Paid</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   ))}
                 </View>
@@ -1230,5 +1328,43 @@ const styles = StyleSheet.create({
   largeAmountText: {
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  paidStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  paidStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F5E8',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    flex: 1,
+    marginRight: 8,
+  },
+  paidStatusText: {
+    fontSize: 14,
+    color: '#34C759',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  undoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFE8E8',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  undoText: {
+    fontSize: 14,
+    color: '#FF3B30',
+    fontWeight: '600',
+    marginLeft: 4,
   },
 });

@@ -527,7 +527,10 @@ class ExpenseService {
   // Get detailed debt breakdown for current user
   async getDetailedDebtBreakdown(tripId, currentUserId) {
     try {
-      const expenses = await this.getTripExpenses(tripId);
+      const [expenses, settlements] = await Promise.all([
+        this.getTripExpenses(tripId),
+        this.getAllSettlements(tripId)
+      ]);
       
       const youOweToOthers = [];
       const othersOweToYou = [];
@@ -573,7 +576,9 @@ class ExpenseService {
                     userName: split.user?.full_name || split.user?.username,
                     owesMe: 0,
                     iOweThem: 0,
-                    netOwesMe: 0
+                    netOwesMe: 0,
+                    paymentStatus: null,
+                    settlementId: null
                   };
                 }
                 memberBalances[userId].owesMe += parseFloat(split.amount_owed);
@@ -602,10 +607,30 @@ class ExpenseService {
               userName: paidByUser?.full_name || paidByUser?.username,
               owesMe: 0,
               iOweThem: 0,
-              netOwesMe: 0
+              netOwesMe: 0,
+              paymentStatus: null,
+              settlementId: null
             };
           }
           memberBalances[paidByUserId].iOweThem += parseFloat(userSplit.amount_owed);
+        }
+      });
+
+      // Check payment status for each member relationship
+      settlements.forEach(settlement => {
+        const fromUserId = settlement.from_user_id;
+        const toUserId = settlement.to_user_id;
+        
+        // Check if current user paid someone
+        if (fromUserId === currentUserId && memberBalances[toUserId]) {
+          memberBalances[toUserId].paymentStatus = 'paid';
+          memberBalances[toUserId].settlementId = settlement.id;
+        }
+        
+        // Check if someone paid current user
+        if (toUserId === currentUserId && memberBalances[fromUserId]) {
+          memberBalances[fromUserId].paymentStatus = 'received';
+          memberBalances[fromUserId].settlementId = settlement.id;
         }
       });
 
@@ -647,15 +672,15 @@ class ExpenseService {
   // Mark a member as paid for their debt
   async markMemberAsPaid(tripId, fromUserId, toUserId, amount) {
     try {
+      // Use debt_settlements table to record payments
       const { data, error } = await supabase
-        .from('debt_payments')
+        .from('debt_settlements')
         .insert({
           trip_id: tripId,
           from_user_id: fromUserId,
           to_user_id: toUserId,
           amount: amount,
-          paid_at: new Date().toISOString(),
-          status: 'completed'
+          settled_at: new Date().toISOString()
         })
         .select()
         .single();
@@ -672,7 +697,7 @@ class ExpenseService {
   async getPaymentHistory(tripId) {
     try {
       const { data, error } = await supabase
-        .from('debt_payments')
+        .from('debt_settlements')
         .select(`
           *,
           from_user:from_user_id (
@@ -687,12 +712,64 @@ class ExpenseService {
           )
         `)
         .eq('trip_id', tripId)
-        .order('paid_at', { ascending: false });
+        .order('settled_at', { ascending: false });
 
       if (error) throw error;
       return data;
     } catch (error) {
       console.error('Error fetching payment history:', error);
+      throw error;
+    }
+  }
+
+  // Check if a payment has been made between two users
+  async checkPaymentStatus(tripId, fromUserId, toUserId) {
+    try {
+      const { data, error } = await supabase
+        .from('debt_settlements')
+        .select('*')
+        .eq('trip_id', tripId)
+        .eq('from_user_id', fromUserId)
+        .eq('to_user_id', toUserId)
+        .order('settled_at', { ascending: false });
+
+      if (error) throw error;
+      return data && data.length > 0 ? data[0] : null;
+    } catch (error) {
+      console.error('Error checking payment status:', error);
+      throw error;
+    }
+  }
+
+  // Undo a payment (delete the settlement record)
+  async undoPayment(settlementId) {
+    try {
+      const { error } = await supabase
+        .from('debt_settlements')
+        .delete()
+        .eq('id', settlementId);
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      console.error('Error undoing payment:', error);
+      throw error;
+    }
+  }
+
+  // Get all settlements for a trip to track payment status
+  async getAllSettlements(tripId) {
+    try {
+      const { data, error } = await supabase
+        .from('debt_settlements')
+        .select('*')
+        .eq('trip_id', tripId)
+        .order('settled_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching settlements:', error);
       throw error;
     }
   }

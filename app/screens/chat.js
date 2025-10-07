@@ -59,6 +59,8 @@ export default function ChatScreen() {
   const [showTripSelector, setShowTripSelector] = useState(false);
   const [refreshingTrips, setRefreshingTrips] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const scrollViewRef = useRef();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -115,8 +117,26 @@ export default function ChatScreen() {
       }),
     ]).start();
 
+    // Add keyboard event listeners
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+      setIsKeyboardVisible(true);
+      // Scroll to bottom when keyboard appears
+      setTimeout(() => {
+        if (scrollViewRef.current) {
+          scrollViewRef.current.scrollToEnd({ animated: true });
+        }
+      }, 100);
+    });
+
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+      setIsKeyboardVisible(false);
+    });
+
     return () => {
-      // Cleanup if needed
+      keyboardDidShowListener?.remove();
+      keyboardDidHideListener?.remove();
     };
   }, []);
 
@@ -644,17 +664,20 @@ export default function ChatScreen() {
       )}
 
       {/* Messages */}
-      <FlatList
-        ref={scrollViewRef}
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.messagesContainer}
-        onContentSizeChange={() => scrollToBottom()}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
-        showsVerticalScrollIndicator={false}
-      />
+      <View style={[styles.messagesWrapper, { marginBottom: isKeyboardVisible ? keyboardHeight : 0 }]}>
+        <FlatList
+          ref={scrollViewRef}
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.messagesContainer}
+          onContentSizeChange={() => scrollToBottom()}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          showsVerticalScrollIndicator={false}
+          automaticallyAdjustKeyboardInsets={false}
+        />
+      </View>
 
       {/* Quick Actions */}
       {showQuickActions && messages.length <= 1 && (
@@ -693,7 +716,15 @@ export default function ChatScreen() {
       )}
 
       {/* Input Bar */}
-      <View style={styles.inputContainer}>
+      <View style={[
+        styles.inputContainer,
+        {
+          position: 'absolute',
+          bottom: isKeyboardVisible ? keyboardHeight : 0,
+          left: 0,
+          right: 0,
+        }
+      ]}>
         <Animated.View style={[
           styles.inputWrapper,
           {
@@ -943,9 +974,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
   },
+  messagesWrapper: {
+    flex: 1,
+  },
   messagesContainer: {
     padding: 15,
     flexGrow: 1,
+    paddingBottom: 80, // Add padding to account for input container
   },
   messageContainer: {
     flexDirection: 'row',
@@ -1074,8 +1109,15 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#e5e5e5',
     paddingBottom: Platform.OS === 'ios' ? 20 : 16,
-    position: 'relative',
     zIndex: 1000,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: -2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
   },
   inputWrapper: {
     flexDirection: 'row',

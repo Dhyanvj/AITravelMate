@@ -1,14 +1,13 @@
-import { format } from 'date-fns';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
-    Modal,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { Card, Icon } from 'react-native-elements';
 import groupTripService from '../../services/groupTripService';
@@ -17,7 +16,7 @@ import { supabase } from '../../services/supabase/supabaseClient';
 import PackingItemForm from '../packing/PackingItemForm';
 
 export default function PackingTab({ tripId, userRole }) {
-  const [activeTab, setActiveTab] = useState('shared');
+  const [activeTab, setActiveTab] = useState('summary');
   const [packingItems, setPackingItems] = useState([]);
   const [personalItems, setPersonalItems] = useState([]);
   const [members, setMembers] = useState([]);
@@ -28,6 +27,7 @@ export default function PackingTab({ tripId, userRole }) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [packingStats, setPackingStats] = useState(null);
+  const [expandedItems, setExpandedItems] = useState(new Set());
 
   // Form states
   const [itemForm, setItemForm] = useState({
@@ -170,6 +170,18 @@ export default function PackingTab({ tripId, userRole }) {
     }
   };
 
+  const toggleItemExpanded = (itemId) => {
+    setExpandedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
+  };
+
   const saveItem = async () => {
     if (!itemForm.title.trim()) {
       Alert.alert('Error', 'Please enter an item title');
@@ -216,10 +228,23 @@ export default function PackingTab({ tripId, userRole }) {
   const renderPackingItem = (item) => {
     const category = packingService.getDefaultCategories().find(cat => cat.id === item.category);
     const assignedUser = members.find(member => member.user_id === item.assigned_to);
+    const isExpanded = expandedItems.has(item.id);
+    const hasDetails = item.description || item.notes;
+    
+    // Get priority color for left border
+    const priorityColor = item.priority === 'high' ? '#FF3B30' : 
+                         item.priority === 'medium' ? '#FF9500' : '#34C759';
+    
+    // Get user initials for avatar
+    const getUserInitials = (user) => {
+      if (!user) return 'U';
+      const name = user.profiles?.full_name || user.profiles?.username || 'User';
+      return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+    };
     
     return (
-      <Card key={item.id} containerStyle={styles.itemCard}>
-        <View style={styles.itemHeader}>
+      <View key={item.id} style={[styles.modernCard, { borderLeftColor: priorityColor }]}>
+        <View style={styles.cardHeader}>
           <TouchableOpacity
             style={styles.checkboxContainer}
             onPress={() => handleTogglePacked(item)}
@@ -228,76 +253,86 @@ export default function PackingTab({ tripId, userRole }) {
               name={item.is_packed ? 'check-box' : 'check-box-outline-blank'}
               type="material"
               color={item.is_packed ? '#34C759' : '#8E8E93'}
-              size={24}
+              size={20}
             />
           </TouchableOpacity>
           
-          <View style={styles.itemInfo}>
-            <Text style={[
-              styles.itemTitle,
-              item.is_packed && styles.itemTitlePacked
-            ]}>
-              {item.title}
-            </Text>
-            <View style={styles.itemMeta}>
-              <View style={[styles.categoryBadge, { backgroundColor: category?.color || '#C7C7CC' }]}>
-                <Icon name={category?.icon || 'more-horiz'} type="material" color="white" size={12} />
-                <Text style={styles.categoryText}>{category?.name || 'Other'}</Text>
-              </View>
-              {item.quantity > 1 && (
-                <Text style={styles.quantityText}>Qty: {item.quantity}</Text>
-              )}
-              <Text style={styles.priorityText}>
-                {item.priority.charAt(0).toUpperCase() + item.priority.slice(1)}
+          <View style={styles.cardContent}>
+            <View style={styles.titleRow}>
+              <Text style={[
+                styles.modernTitle,
+                item.is_packed && styles.itemTitlePacked
+              ]}>
+                {item.title}
               </Text>
+              <View style={styles.actionButtons}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleEditItem(item)}
+                >
+                  <Icon name="edit" type="material" size={16} color="#007AFF" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleDeleteItem(item)}
+                >
+                  <Icon name="delete" type="material" size={16} color="#FF3B30" />
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-          
-          <View style={styles.itemActions}>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => handleEditItem(item)}
-            >
-              <Icon name="edit" type="material" size={16} color="#007AFF" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => handleDeleteItem(item)}
-            >
-              <Icon name="delete" type="material" size={16} color="#FF3B30" />
-            </TouchableOpacity>
+            
+            <View style={styles.metadataRow}>
+              <View style={[styles.categoryTag, { backgroundColor: category?.color || '#C7C7CC' }]}>
+                <Text style={styles.categoryTagText}>{category?.name || 'Other'}</Text>
+              </View>
+              
+              {item.quantity > 1 && (
+                <View style={styles.quantityTag}>
+                  <Text style={styles.quantityTagText}>×{item.quantity}</Text>
+                </View>
+              )}
+              
+              {assignedUser && (
+                <View style={styles.assignmentTag}>
+                  <View style={styles.userAvatar}>
+                    <Text style={styles.avatarText}>{getUserInitials(assignedUser)}</Text>
+                  </View>
+                  <Text style={styles.assignmentText}>
+                    {assignedUser.profiles?.full_name || assignedUser.profiles?.username}
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
         </View>
         
-        {item.description && (
-          <Text style={styles.itemDescription}>{item.description}</Text>
+        {hasDetails && (
+          <TouchableOpacity
+            style={styles.showDetailsButton}
+            onPress={() => toggleItemExpanded(item.id)}
+          >
+            <Text style={styles.showDetailsText}>Show details</Text>
+            <Icon
+              name={isExpanded ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
+              type="material"
+              size={16}
+              color="#8E8E93"
+            />
+          </TouchableOpacity>
         )}
 
-        {assignedUser && (
-          <View style={styles.assignedContainer}>
-            <Icon name="person" type="material" size={14} color="#8E8E93" />
-            <Text style={styles.assignedText}>
-              Assigned to {assignedUser.profiles?.full_name || assignedUser.profiles?.username}
-            </Text>
+        {isExpanded && (
+          <View style={styles.detailsSection}>
+            {item.description && (
+              <Text style={styles.descriptionText}>{item.description}</Text>
+            )}
+
+            {item.notes && (
+              <Text style={styles.notesText}>{item.notes}</Text>
+            )}
           </View>
         )}
-
-        {item.notes && (
-          <View style={styles.notesContainer}>
-            <Icon name="note" type="material" size={14} color="#8E8E93" />
-            <Text style={styles.notesText}>{item.notes}</Text>
-          </View>
-        )}
-
-        <View style={styles.itemFooter}>
-          <Text style={styles.createdText}>
-            Added by {item.created_by ? 'User' : 'Unknown'}
-          </Text>
-          <Text style={styles.dateText}>
-            {format(new Date(item.created_at), 'MMM dd, yyyy')}
-          </Text>
-        </View>
-      </Card>
+      </View>
     );
   };
 
@@ -357,11 +392,16 @@ export default function PackingTab({ tripId, userRole }) {
         </TouchableOpacity>
       </View>
 
-      {/* Stats */}
-      {renderPackingStats()}
-
       {/* Tabs */}
       <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'summary' && styles.activeTab]}
+          onPress={() => setActiveTab('summary')}
+        >
+          <Text style={[styles.tabText, activeTab === 'summary' && styles.activeTabText]}>
+            Summary
+          </Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'shared' && styles.activeTab]}
           onPress={() => setActiveTab('shared')}
@@ -387,6 +427,12 @@ export default function PackingTab({ tripId, userRole }) {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
+        {activeTab === 'summary' && (
+          <View>
+            {renderPackingStats()}
+          </View>
+        )}
+
         {activeTab === 'shared' && (
           <View>
             {packingItems.length === 0 ? (
@@ -564,108 +610,133 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
-  itemCard: {
-    marginBottom: 16,
-    borderRadius: 12,
-    elevation: 2,
+  modernCard: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    marginBottom: 8,
+    borderLeftWidth: 4,
+    elevation: 1,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowRadius: 2,
   },
-  itemHeader: {
+  cardHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    padding: 12,
   },
   checkboxContainer: {
     marginRight: 12,
     marginTop: 2,
   },
-  itemInfo: {
+  cardContent: {
     flex: 1,
   },
-  itemTitle: {
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modernTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#000',
-    marginBottom: 8,
+    flex: 1,
   },
-  itemTitlePacked: {
-    textDecorationLine: 'line-through',
-    color: '#8E8E93',
-  },
-  itemMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-  },
-  categoryBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 8,
-    marginBottom: 4,
-  },
-  categoryText: {
-    fontSize: 12,
-    color: 'white',
-    marginLeft: 4,
-    fontWeight: '600',
-  },
-  quantityText: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginRight: 8,
-  },
-  priorityText: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginRight: 8,
-  },
-  itemActions: {
+  actionButtons: {
     flexDirection: 'row',
   },
   actionButton: {
-    padding: 8,
-    marginLeft: 4,
+    padding: 6,
+    marginLeft: 8,
+    borderRadius: 4,
   },
-  itemDescription: {
-    fontSize: 14,
-    color: '#000',
-    marginBottom: 12,
-    lineHeight: 20,
-  },
-  assignedContainer: {
+  metadataRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    flexWrap: 'wrap',
+    gap: 6,
   },
-  assignedText: {
+  categoryTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  categoryTagText: {
     fontSize: 12,
-    color: '#8E8E93',
-    marginLeft: 4,
+    color: 'white',
+    fontWeight: '500',
   },
-  notesContainer: {
+  quantityTag: {
+    backgroundColor: '#F2F2F7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  quantityTagText: {
+    fontSize: 12,
+    color: '#000',
+    fontWeight: '500',
+  },
+  assignmentTag: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    backgroundColor: '#F2F2F7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  userAvatar: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 6,
+  },
+  avatarText: {
+    fontSize: 10,
+    color: 'white',
+    fontWeight: '600',
+  },
+  assignmentText: {
+    fontSize: 12,
+    color: '#000',
+    fontWeight: '500',
+  },
+  showDetailsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E5EA',
+  },
+  showDetailsText: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginRight: 4,
+  },
+  detailsSection: {
+    padding: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E5EA',
+  },
+  descriptionText: {
+    fontSize: 14,
+    color: '#000',
     marginBottom: 8,
+    lineHeight: 20,
   },
   notesText: {
     fontSize: 12,
     color: '#8E8E93',
-    marginLeft: 4,
-    flex: 1,
-  },
-  itemFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E5EA',
+    fontStyle: 'italic',
   },
   createdText: {
     fontSize: 12,

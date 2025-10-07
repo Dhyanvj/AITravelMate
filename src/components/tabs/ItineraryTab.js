@@ -22,6 +22,7 @@ export default function ItineraryTab({ tripId, userRole }) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingSuggestion, setEditingSuggestion] = useState(null);
   const [selectedDay, setSelectedDay] = useState(1);
+  const [activeTab, setActiveTab] = useState('activities'); // 'suggestions' or 'activities'
   const [loading, setLoading] = useState(false);
   const [tripDetails, setTripDetails] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
@@ -345,6 +346,15 @@ export default function ItineraryTab({ tripId, userRole }) {
   const generateAIItinerary = async () => {
     setLoading(true);
     try {
+      console.log('Starting AI itinerary generation...');
+      console.log('Trip details:', {
+        destination: tripDetails.destination,
+        startDate: tripDetails.start_date,
+        endDate: tripDetails.end_date,
+        budget: tripDetails.budget,
+        tripType: tripDetails.trip_type
+      });
+
       const itinerary = await AIService.generateItinerary({
         destination: tripDetails.destination,
         startDate: tripDetails.start_date,
@@ -356,37 +366,75 @@ export default function ItineraryTab({ tripId, userRole }) {
         notes: tripDetails.description
       });
 
-      // Add AI-generated activities to database
-      for (const day of itinerary.dailyItinerary) {
-        const activities = [
-          { ...day.morning, time: '09:00' },
-          { ...day.afternoon, time: '14:00' },
-          { ...day.evening, time: '19:00' }
-        ];
+      console.log('AI itinerary generated:', itinerary);
 
-        for (const activity of activities) {
-          await supabase
-            .from('itineraries')
-            .insert([{
-              trip_id: tripId,
-              day_number: day.day,
-              activities: {
-                title: activity.activity,
-                description: activity.description,
+      // Create AI-generated suggestions instead of direct activities
+      const suggestionsToInsert = [];
+      
+      if (itinerary && itinerary.dailyItinerary && Array.isArray(itinerary.dailyItinerary)) {
+        for (const day of itinerary.dailyItinerary) {
+          const activities = [
+            { ...day.morning, time: '09:00' },
+            { ...day.afternoon, time: '14:00' },
+            { ...day.evening, time: '19:00' }
+          ];
+
+          for (const activity of activities) {
+            if (activity.activity && activity.activity.trim()) {
+              const suggestionData = {
+                trip_id: tripId,
+                suggested_by: currentUser.id,
+                activity_name: activity.activity,
+                description: activity.description || '',
+                location: activity.location || '',
+                day_number: day.day,
                 time: activity.time,
-                duration: activity.duration,
-                cost: activity.cost,
-                completed: false
+                start_time: activity.time,
+                duration_hours: parseFloat(activity.duration) || 1,
+                status: 'pending',
+                votes_up: 0,
+                votes_down: 0
+              };
+
+              // Only add is_ai_generated if the column exists
+              // This will be handled by the database migration
+              try {
+                suggestionData.is_ai_generated = true;
+              } catch (error) {
+                console.warn('is_ai_generated column not available, suggestion will be marked as manual');
               }
-            }]);
+
+              suggestionsToInsert.push(suggestionData);
+            }
+          }
         }
+      } else {
+        console.error('Invalid itinerary structure:', itinerary);
+        throw new Error('Invalid itinerary data received from AI service');
       }
 
-      Alert.alert('Success', 'AI itinerary generated!');
-      fetchActivities();
+       // Insert all suggestions at once
+       if (suggestionsToInsert.length > 0) {
+         console.log('Inserting suggestions:', suggestionsToInsert.length);
+
+         const { error } = await supabase
+           .from('activity_suggestions')
+           .insert(suggestionsToInsert);
+
+         if (error) {
+           console.error('Database error:', error);
+           throw error;
+         }
+       } else {
+         console.warn('No valid activities found in AI response');
+       }
+
+      Alert.alert('Success', `AI generated ${suggestionsToInsert.length} activity suggestions! Check the Suggestions tab to review and approve them.`);
+      fetchSuggestions();
       setShowAIModal(false);
     } catch (error) {
-      Alert.alert('Error', 'Failed to generate itinerary');
+      console.error('AI Generation Error:', error);
+      Alert.alert('Error', `Failed to generate itinerary: ${error.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -575,7 +623,7 @@ export default function ItineraryTab({ tripId, userRole }) {
         </View>
 
         <Text style={styles.suggestedBy}>
-          Suggested by {suggestion.suggested_by_profile?.full_name || 'Unknown'}
+          Suggested by {suggestion.is_ai_generated === true ? 'AI' : (suggestion.suggested_by_profile?.full_name || 'Unknown')}
         </Text>
 
         <View style={styles.voteContainer}>
@@ -643,42 +691,116 @@ export default function ItineraryTab({ tripId, userRole }) {
         />
       </View>
 
-      {/* Suggestions Section */}
-      {suggestions.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Pending Suggestions</Text>
-          {suggestions.map(renderSuggestion)}
+      {/* Main Tab Navigation */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'suggestions' && styles.activeTab]}
+          onPress={() => setActiveTab('suggestions')}
+        >
+          <Icon 
+            name="lightbulb-outline" 
+            type="material" 
+            color={activeTab === 'suggestions' ? '#fff' : '#666'} 
+            size={20} 
+          />
+          <Text style={[styles.tabText, activeTab === 'suggestions' && styles.activeTabText]}>
+          Suggestions
+          </Text>
+          {suggestions.filter(s => s.day_number === selectedDay).length > 0 && (
+            <View style={styles.badgeContainer}>
+              <Text style={styles.badgeText}>{suggestions.filter(s => s.day_number === selectedDay).length}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'activities' && styles.activeTab]}
+          onPress={() => setActiveTab('activities')}
+        >
+          <Icon 
+            name="event" 
+            type="material" 
+            color={activeTab === 'activities' ? '#fff' : '#666'} 
+            size={20} 
+          />
+          <Text style={[styles.tabText, activeTab === 'activities' && styles.activeTabText]}>
+            Activities
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Tab Content */}
+      {activeTab === 'suggestions' && (
+        <View style={styles.tabContent}>
+          {/* Day Tabs for Suggestions */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dayTabs}>
+            {getDaysArray().map(day => (
+              <TouchableOpacity
+                key={day}
+                style={[styles.dayTab, selectedDay === day && styles.activeDayTab]}
+                onPress={() => setSelectedDay(day)}
+              >
+                <Text style={[styles.dayTabText, selectedDay === day && styles.activeDayTabText]}>
+                  Day {day}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* Suggestions List */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Day {selectedDay} Suggestions</Text>
+            {suggestions
+              .filter(s => s.day_number === selectedDay)
+              .length > 0 ? (
+              suggestions
+                .filter(s => s.day_number === selectedDay)
+                .map(renderSuggestion)
+            ) : (
+              <Card containerStyle={styles.emptyCard}>
+                <Icon name="lightbulb-outline" type="material" size={48} color="#ccc" />
+                <Text style={styles.emptyText}>No suggestions for Day {selectedDay}</Text>
+                <Text style={styles.emptySubtext}>Suggest an activity for this day!</Text>
+              </Card>
+            )}
+          </View>
         </View>
       )}
 
-      {/* Day Tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dayTabs}>
-        {getDaysArray().map(day => (
-          <TouchableOpacity
-            key={day}
-            style={[styles.dayTab, selectedDay === day && styles.activeDayTab]}
-            onPress={() => setSelectedDay(day)}
-          >
-            <Text style={[styles.dayTabText, selectedDay === day && styles.activeDayTabText]}>
-              Day {day}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {activeTab === 'activities' && (
+        <View style={styles.tabContent}>
+          {/* Day Tabs */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dayTabs}>
+            {getDaysArray().map(day => (
+              <TouchableOpacity
+                key={day}
+                style={[styles.dayTab, selectedDay === day && styles.activeDayTab]}
+                onPress={() => setSelectedDay(day)}
+              >
+                <Text style={[styles.dayTabText, selectedDay === day && styles.activeDayTabText]}>
+                  Day {day}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
 
-      {/* Activities List */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Day {selectedDay} Activities</Text>
-        {activities
-          .filter(a => a.day_number === selectedDay)
-          .map(renderActivity)}
+          {/* Activities List */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Day {selectedDay} Activities</Text>
+            {activities
+              .filter(a => a.day_number === selectedDay)
+              .map(renderActivity)}
 
-        {activities.filter(a => a.day_number === selectedDay).length === 0 && (
-          <Card containerStyle={styles.emptyCard}>
-            <Text style={styles.emptyText}>No activities planned for this day</Text>
-          </Card>
-        )}
-      </View>
+            {activities.filter(a => a.day_number === selectedDay).length === 0 && (
+              <Card containerStyle={styles.emptyCard}>
+                <Icon name="event" type="material" size={48} color="#ccc" />
+                <Text style={styles.emptyText}>No activities planned for this day</Text>
+                <Text style={styles.emptySubtext}>Add an activity or generate with AI!</Text>
+              </Card>
+            )}
+          </View>
+        </View>
+      )}
 
       {/* Suggest Activity Modal */}
       <Modal
@@ -951,7 +1073,7 @@ export default function ItineraryTab({ tripId, userRole }) {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Generate AI Itinerary</Text>
             <Text style={styles.modalDescription}>
-              AI will create a complete itinerary based on your trip details and preferences.
+              AI will create activity suggestions based on your trip details and preferences. Review and approve them in the Suggestions tab.
             </Text>
 
             <View style={styles.modalButtons}>
@@ -996,6 +1118,64 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 6,
     elevation: 4,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 15,
+    marginBottom: 15,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    position: 'relative',
+  },
+  activeTab: {
+    backgroundColor: '#00BFA5',
+    shadowColor: '#00BFA5',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginLeft: 8,
+  },
+  activeTabText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  badgeContainer: {
+    backgroundColor: '#ff4444',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  tabContent: {
+    flex: 1,
   },
   section: {
     marginBottom: 20,
@@ -1233,6 +1413,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#5a6c7d',
     fontWeight: '500',
+    marginTop: 10,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: '#999',
+    marginTop: 5,
+    textAlign: 'center',
   },
   modalContainer: {
     flex: 1,

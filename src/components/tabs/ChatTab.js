@@ -6,6 +6,7 @@ import {
   Dimensions,
   FlatList,
   Image,
+  Keyboard,
   Modal,
   Platform,
   StyleSheet,
@@ -54,6 +55,8 @@ const ChatTab = ({ tripId, userRole }) => {
   const [connectionType, setConnectionType] = useState('unknown');
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [showContextMenu, setShowContextMenu] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   
   const flatListRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -64,8 +67,27 @@ const ChatTab = ({ tripId, userRole }) => {
   useEffect(() => {
     initializeChat();
     
+    // Add keyboard event listeners
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+      setIsKeyboardVisible(true);
+      // Scroll to bottom when keyboard appears
+      setTimeout(() => {
+        if (flatListRef.current) {
+          flatListRef.current.scrollToEnd({ animated: true });
+        }
+      }, 100);
+    });
+
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+      setIsKeyboardVisible(false);
+    });
+    
     return () => {
       websocketService.disconnect();
+      keyboardDidShowListener?.remove();
+      keyboardDidHideListener?.remove();
     };
   }, [tripId]);
 
@@ -914,26 +936,37 @@ const ChatTab = ({ tripId, userRole }) => {
   return (
     <View style={styles.container}>
       {/* Messages List */}
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={(item, index) => item.id || `message-${index}`}
-        style={styles.messagesList}
-        contentContainerStyle={styles.messagesContent}
-        onContentSizeChange={() => {
-          if (flatListRef.current && messages.length > 0) {
-            flatListRef.current.scrollToEnd({ animated: true });
-          }
-        }}
-        ListFooterComponent={renderTypingIndicator}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
-        showsVerticalScrollIndicator={false}
-      />
+      <View style={[styles.messagesWrapper, { marginBottom: isKeyboardVisible ? keyboardHeight : 0 }]}>
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={(item, index) => item.id || `message-${index}`}
+          style={styles.messagesList}
+          contentContainerStyle={styles.messagesContent}
+          onContentSizeChange={() => {
+            if (flatListRef.current && messages.length > 0) {
+              flatListRef.current.scrollToEnd({ animated: true });
+            }
+          }}
+          ListFooterComponent={renderTypingIndicator}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          showsVerticalScrollIndicator={false}
+          automaticallyAdjustKeyboardInsets={false}
+        />
+      </View>
 
       {/* Message Input */}
-      <View style={styles.inputContainer}>
+      <View style={[
+        styles.inputContainer,
+        {
+          position: 'absolute',
+          bottom: isKeyboardVisible ? keyboardHeight : 0,
+          left: 0,
+          right: 0,
+        }
+      ]}>
         {editingMessage && (
           <View style={styles.editingIndicator}>
             <Text style={styles.editingText}>Editing message...</Text>
@@ -1086,12 +1119,15 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: '#666',
   },
+  messagesWrapper: {
+    flex: 1,
+  },
   messagesList: {
     flex: 1,
   },
   messagesContent: {
     padding: 15,
-    paddingBottom: 10,
+    paddingBottom: 100, // Add padding to account for input container
   },
   messageContainer: {
     marginBottom: 15,
@@ -1242,8 +1278,15 @@ const styles = StyleSheet.create({
     padding: 15,
     minHeight: 70,
     paddingBottom: Platform.OS === 'ios' ? 15 : 20,
-    position: 'relative',
     zIndex: 1000,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: -2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
   },
   editingIndicator: {
     flexDirection: 'row',
